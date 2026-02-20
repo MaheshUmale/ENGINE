@@ -1,6 +1,7 @@
 import pandas as pd
 from .data_provider import DataProvider
 from .strategy import StrategyEngine
+from .database import get_session
 from .execution import ExecutionEngine
 from .config import INDICES
 
@@ -30,9 +31,20 @@ class Backtester:
             return
 
         # Align data
-        combined = pd.merge(idx_hist, ce_hist, on='timestamp', suffixes=('_idx', '_ce'))
-        combined = pd.merge(combined, pe_hist, on='timestamp', suffixes=('', '_pe'))
-        combined = pd.merge(combined, fut_hist, on='timestamp', suffixes=('', '_fut'))
+        idx_hist = idx_hist.rename(columns={c: f"{c}_idx" for c in idx_hist.columns if c != 'timestamp'})
+        ce_hist = ce_hist.rename(columns={c: f"{c}_ce" for c in ce_hist.columns if c != 'timestamp'})
+        pe_hist = pe_hist.rename(columns={c: f"{c}_pe" for c in pe_hist.columns if c != 'timestamp'})
+        if fut_hist is not None:
+            fut_hist = fut_hist.rename(columns={c: f"{c}_fut" for c in fut_hist.columns if c != 'timestamp'})
+
+        combined = pd.merge(idx_hist, ce_hist, on='timestamp')
+        combined = pd.merge(combined, pe_hist, on='timestamp')
+        if fut_hist is not None and not fut_hist.empty:
+            combined = pd.merge(combined, fut_hist, on='timestamp')
+        else:
+            print("Future data missing, skipping volume proxy.")
+            # Add dummy volume_fut
+            combined['volume_fut'] = 0
         combined.sort_values('timestamp', inplace=True)
 
         for i in range(50, len(combined)):
@@ -40,17 +52,18 @@ class Backtester:
             current = combined.iloc[i]
 
             # Update strategy with current prices
-            self.strategy.update_data(details['index'], {'ltp': current['close']})
+            self.strategy.update_data(details['index'], {'ltp': current['close_idx']})
             self.strategy.update_data(details['ce'], {'ltp': current['close_ce'], 'oi_delta': current['oi_ce'] - combined.iloc[i-1]['oi_ce']})
             self.strategy.update_data(details['pe'], {'ltp': current['close_pe'], 'oi_delta': current['oi_pe'] - combined.iloc[i-1]['oi_pe']})
 
             # Identify Swings
-            swing = self.strategy.identify_swing(subset[['high', 'low', 'close']])
+            swing_data = subset.rename(columns={'high_idx': 'high', 'low_idx': 'low', 'close_idx': 'close'})
+            swing = self.strategy.identify_swing(swing_data[['high', 'low', 'close']])
             if swing:
                 # Save as reference level
                 self.strategy.save_reference_level(
                     swing['type'],
-                    current['close'],
+                    current['close_idx'],
                     current['close_ce'],
                     current['close_pe'],
                     details['ce'],
@@ -60,7 +73,12 @@ class Backtester:
             # Check for Signals
             signal = self.strategy.generate_signals(details)
             if signal:
+                # Execute first, then save to avoid DetachedInstanceError during execution
                 self.execution.execute_signal(signal)
+                session = get_session()
+                session.add(signal)
+                session.commit()
+                session.close()
 
             # Check for Exits
             if self.index_name in self.execution.positions:
@@ -68,7 +86,7 @@ class Backtester:
                 # Simulating exit check
                 if self.strategy.check_exit_condition(
                     pd.Series({'side': pos['side']}),
-                    {'ltp': current['close']},
+                    {'ltp': current['close_idx']},
                     {'ltp': current['close_ce']},
                     {'ltp': current['close_pe']}
                 ):

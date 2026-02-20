@@ -44,11 +44,11 @@ class StrategyEngine:
         Phase II: The Pullback & Decay Filter (Anti-Theta)
         If Index returns to Ref_Price_Index but Current_Price_CE is higher than Ref_Price_CE
         """
-        if not ref_level or ref_level.type != 'High':
+        if not ref_level or ref_level['type'] != 'High':
             return False
 
-        if current_index_price >= ref_level.index_price:
-            if current_ce_price > ref_level.ce_price:
+        if current_index_price >= ref_level['index_price']:
+            if current_ce_price > ref_level['ce_price']:
                 return True # Bullish Divergence
         return False
 
@@ -76,17 +76,17 @@ class StrategyEngine:
             details = {}
 
             # 1. Index: Crosses above Ref_Price_Index
-            if idx_data['ltp'] > ref_high.index_price:
+            if idx_data['ltp'] > ref_high['index_price']:
                 score += 1
                 details['index_break'] = True
 
             # 2. Symmetry (CE): Current_Price_CE crosses above Ref_Price_CE
-            if ce_data['ltp'] > ref_high.ce_price:
+            if ce_data['ltp'] > ref_high['ce_price']:
                 score += 1
                 details['ce_break'] = True
 
             # 3. Symmetry (PE Breakdown): Current_Price_PE must break below local support/low
-            if pe_data['ltp'] < ref_high.pe_price:
+            if pe_data['ltp'] < ref_high['pe_price']:
                 score += 1
                 details['pe_breakdown'] = True
 
@@ -113,15 +113,15 @@ class StrategyEngine:
             score = 0
             details = {}
 
-            if idx_data['ltp'] < ref_low.index_price:
+            if idx_data['ltp'] < ref_low['index_price']:
                 score += 1
                 details['index_break'] = True
 
-            if pe_data['ltp'] > ref_low.pe_price:
+            if pe_data['ltp'] > ref_low['pe_price']:
                 score += 1
                 details['pe_break'] = True
 
-            if ce_data['ltp'] < ref_low.ce_price:
+            if ce_data['ltp'] < ref_low['ce_price']:
                 score += 1
                 details['ce_breakdown'] = True
 
@@ -163,18 +163,18 @@ class StrategyEngine:
         Returns True if a trap is detected (should VOID trade)
         """
         if side == 'Bullish':
-            if idx_data['ltp'] > ref_level.index_price and ce_data['ltp'] <= ref_level.ce_price:
+            if idx_data['ltp'] > ref_level['index_price'] and ce_data['ltp'] <= ref_level['ce_price']:
                 return True
             if ce_data.get('oi_delta', 0) > 0:
                 return True
-            if pe_data['ltp'] >= ref_level.pe_price:
+            if pe_data['ltp'] >= ref_level['pe_price']:
                 return True
         elif side == 'Bearish':
-            if idx_data['ltp'] < ref_level.index_price and pe_data['ltp'] <= ref_level.pe_price:
+            if idx_data['ltp'] < ref_level['index_price'] and pe_data['ltp'] <= ref_level['pe_price']:
                 return True
             if pe_data.get('oi_delta', 0) > 0:
                 return True
-            if ce_data['ltp'] >= ref_level.ce_price:
+            if ce_data['ltp'] >= ref_level['ce_price']:
                 return True
 
         return False
@@ -192,5 +192,12 @@ class StrategyEngine:
         )
         session.add(ref)
         session.commit()
-        self.reference_levels[level_type] = ref
+
+        # Store as a plain dict to avoid DetachedInstanceError
+        self.reference_levels[level_type] = {
+            'index_price': index_price,
+            'ce_price': ce_price,
+            'pe_price': pe_price,
+            'type': level_type
+        }
         session.close()

@@ -11,6 +11,10 @@ async def main():
 
     args = parser.parse_args()
 
+    # Initialize DB
+    from engine.database import init_db
+    init_db()
+
     if args.mode == 'live':
         bot = TradingBot()
         await bot.run()
