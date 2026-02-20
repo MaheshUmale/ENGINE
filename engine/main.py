@@ -20,9 +20,17 @@ class TradingBot:
 
         feeds = message.get('feeds', {})
         for key, data in feeds.items():
-            ltp = data.get('last_price')
-            oi = data.get('oi')
-            vtt = data.get('volume')
+            full_feed = data.get('fullFeed', {})
+            ltp, oi, vtt = None, None, None
+
+            if 'indexFF' in full_feed:
+                ltp = full_feed['indexFF'].get('ltpc', {}).get('ltp')
+            elif 'marketFF' in full_feed:
+                mff = full_feed['marketFF']
+                ltp = mff.get('ltpc', {}).get('ltp')
+                oi = mff.get('oi')
+                vtt = mff.get('vtt')
+                if vtt: vtt = float(vtt) # vtt is string in V3
 
             if ltp is None: continue
 
