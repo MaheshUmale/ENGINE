@@ -14,14 +14,22 @@ class DataProvider:
         self.configuration.access_token = access_token
         self.api_instance = upstox_client.MarketQuoteApi(upstox_client.ApiClient(self.configuration))
         self.history_api = upstox_client.HistoryApi(upstox_client.ApiClient(self.configuration))
+        self.options_api = upstox_client.OptionsApi(upstox_client.ApiClient(self.configuration))
         self.instruments = {} # Store current instruments for each index
         self.running = False
         self.oi_cache = {} # instrument_key -> last_oi
 
     def get_market_quote(self, symbol_list):
+        if isinstance(symbol_list, list):
+            symbol_list = ",".join(symbol_list)
         try:
-            api_response = self.api_instance.get_full_market_quote(symbol_list)
-            return api_response.data
+            api_response = self.api_instance.get_full_market_quote(symbol_list, '2.0')
+            # Normalize keys to use | instead of :
+            normalized_data = {}
+            for k, v in api_response.data.items():
+                normalized_key = k.replace(':', '|')
+                normalized_data[normalized_key] = v
+            return normalized_data
         except ApiException as e:
             print(f"Exception when calling MarketQuoteApi->get_full_market_quote: {e}")
             return None
@@ -32,8 +40,15 @@ class DataProvider:
         if from_date is None:
             from_date = (datetime.datetime.now() - datetime.timedelta(days=10)).strftime('%Y-%m-%d')
 
+        # If fetching for today, use intraday API
+        today_str = datetime.datetime.now().strftime('%Y-%m-%d')
+
         try:
-            api_response = self.history_api.get_historical_candle_data1(instrument_key, interval, to_date, from_date)
+            if to_date == today_str:
+                api_response = self.history_api.get_intra_day_candle_data(instrument_key, interval, '2.0')
+            else:
+                api_response = self.history_api.get_historical_candle_data1(instrument_key, interval, to_date, from_date, '2.0')
+
             if api_response.status == 'success':
                 df = pd.DataFrame(api_response.data.candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'oi'])
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
@@ -45,34 +60,59 @@ class DataProvider:
 
     async def get_instrument_details(self, index_name):
         """
-        Dynamically discovers ATM options and nearest expiry for the given index.
+        Dynamically discovers ATM options and nearest expiry for the given index using Option Chain API.
         """
-        quotes = self.get_market_quote([INDICES[index_name]['index_key']])
+        index_key = INDICES[index_name]['index_key']
+        quotes = self.get_market_quote([index_key])
         if not quotes:
             return None
 
-        ltp = quotes[INDICES[index_name]['index_key']].last_price
-        strike = round(ltp / 50 if index_name == 'NIFTY' else ltp / 100) * (50 if index_name == 'NIFTY' else 100)
+        ltp = quotes[index_key].last_price
 
-        # In a real implementation, we would query the instrument master to find the nearest expiry.
-        # For this bot, we'll implement a robust discovery placeholder that would use the master data.
-        expiry_date = self.discover_nearest_expiry(index_name)
-        expiry_tag = expiry_date.strftime('%y%b').upper() # e.g., 25FEB
-        # Upstox format: NSE_FO|NIFTY25FEB25000CE
-        ce_key = f"NSE_FO|{index_name}{expiry_date.strftime('%y%#m%d')}{strike}CE"
-        pe_key = f"NSE_FO|{index_name}{expiry_date.strftime('%y%#m%d')}{strike}PE"
+        try:
+            # Get nearest expiry dates
+            contract_res = self.options_api.get_option_contracts(index_key)
+            if contract_res.status != 'success' or not contract_res.data:
+                return None
 
-        # Futures discovery
-        fut_key = f"NSE_FO|{index_name}{expiry_date.strftime('%y%b').upper()}FUT"
+            # Sort expiries
+            expiries = sorted(list(set([c.expiry for c in contract_res.data])))
+            nearest_expiry = expiries[0]
 
-        return {
-            'index': INDICES[index_name]['index_key'],
-            'ce': ce_key,
-            'pe': pe_key,
-            'fut': fut_key,
-            'ltp': ltp,
-            'strike': strike
-        }
+            # Get Option Chain for nearest expiry
+            chain_res = self.options_api.get_put_call_option_chain(index_key, nearest_expiry)
+            if chain_res.status != 'success' or not chain_res.data:
+                return None
+
+            # Find ATM strikes
+            # Sort by absolute difference from LTP
+            atm_contracts = sorted(chain_res.data, key=lambda x: abs(x.strike_price - ltp))
+            atm = atm_contracts[0]
+
+            ce_key = atm.call_options.instrument_key
+            pe_key = atm.put_options.instrument_key
+
+            # For Future, we still need to guess or use another discovery
+            # But we have CE/PE!
+            # Let's use the year and month from the expiry for the Future
+            if isinstance(nearest_expiry, str):
+                expiry_date = datetime.datetime.strptime(nearest_expiry, '%Y-%m-%d')
+            else:
+                expiry_date = nearest_expiry
+            fut_key = f"NSE_FO|{index_name}{expiry_date.strftime('%y%b').upper()}FUT"
+
+            return {
+                'index': index_key,
+                'ce': ce_key,
+                'pe': pe_key,
+                'fut': fut_key,
+                'ltp': ltp,
+                'strike': atm.strike_price,
+                'expiry': nearest_expiry
+            }
+        except Exception as e:
+            print(f"Discovery Error: {e}")
+            return None
 
     def discover_nearest_expiry(self, index_name):
         # Placeholder for expiry discovery. In practice, this would parse the instrument master CSV.

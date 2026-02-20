@@ -14,14 +14,10 @@ STRIKE_UPDATE_THRESHOLD = 25  # Index move in points
 # Instruments to monitor
 INDICES = {
     'NIFTY': {
-        'index_key': 'NSE_INDEX|Nifty 50',
-        'fut_key': 'NSE_FO|NIFTY26FEB25FUT',  # Example future key, will be dynamically updated
-        'expiry_tag': 'NIFTY26FEB25'
+        'index_key': 'NSE_INDEX|Nifty 50'
     },
     'BANKNIFTY': {
-        'index_key': 'NSE_INDEX|Nifty Bank',
-        'fut_key': 'NSE_FO|BANKNIFTY26FEB25FUT',
-        'expiry_tag': 'BANKNIFTY26FEB25'
+        'index_key': 'NSE_INDEX|Nifty Bank'
     }
 }
 
