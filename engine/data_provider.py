@@ -39,49 +39,54 @@ class DataProvider:
         except Exception as e:
             print(f"Exception when calling MarketQuoteV3Api->get_ltp: {e}")
             return None
-        
-    def getData(self, instrument_key, interval=1, to_date=None, from_date=None):
-        import upstox_client
-        configuration = upstox_client.Configuration()
-        configuration.access_token = ACCESS_TOKEN
-        apiInstance = upstox_client.HistoryV3Api(upstox_client.ApiClient(configuration))
-        try:
-            response = apiInstance.get_historical_candle_data1(instrument_key, "minutes", "1", to_date, from_date )
 
-            #convert response into DF as timestmap ,o ,h l ,c v, oi 
-            df = pd.DataFrame(response.data.candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'oi'])
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
-            return df 
-        # except ApiException as e:
-        except Exception as e:
-            print("Exception when calling HistoryV3Api->get_historical_candle_data1: %s\n" % e)
-            
     def get_historical_data(self, instrument_key, interval=1, to_date=None, from_date=None):
         if to_date is None:
             to_date = datetime.datetime.now().strftime('%Y-%m-%d')
         if from_date is None:
             from_date = (datetime.datetime.now() - datetime.timedelta(days=10)).strftime('%Y-%m-%d')
 
-        # If fetching for today, use intraday API
-        today_str = datetime.datetime.now().strftime('%Y-%m-%d')
-
-        # V3 interval is usually passed as string in some examples, let's try string
         try:
-            interval_str = str(interval)
-            if to_date == today_str:
-                api_response = self.history_api.get_intra_day_candle_data(instrument_key, "minutes", interval_str)
-            else:
-                api_response = self.history_api.get_historical_candle_data1(instrument_key, "minutes", 1, to_date, from_date)
-                self.getData(instrument_key, 1, to_date, from_date)
-            if api_response.status == 'success':
-                df = pd.DataFrame(api_response.data.candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'oi'])
+            all_candles = []
+            headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'Authorization': f'Bearer {self.configuration.access_token}'
+            }
+            # V3 API expects the pipe character in the instrument key
+
+            # 1. Historical Data
+            v3_url_hist = f"https://api.upstox.com/v3/historical-candle/{instrument_key}/minutes/{interval}/{to_date}/{from_date}"
+            resp = requests.get(v3_url_hist, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get('status') == 'success' and 'candles' in data.get('data', {}):
+                    all_candles.extend(data['data']['candles'])
+
+            # 2. Intraday Data (if range includes today)
+            today_str = datetime.datetime.now().strftime('%Y-%m-%d')
+            # If to_date is today or after today
+            if to_date >= today_str:
+                v3_url_intra = f"https://api.upstox.com/v3/historical-candle/intraday/{instrument_key}/minutes/{interval}"
+                resp_intra = requests.get(v3_url_intra, headers=headers)
+                if resp_intra.status_code == 200:
+                    data_intra = resp_intra.json()
+                    if data_intra.get('status') == 'success' and 'candles' in data_intra.get('data', {}):
+                        existing_ts = {c[0] for c in all_candles}
+                        for c in data_intra['data']['candles']:
+                            if c[0] not in existing_ts:
+                                all_candles.append(c)
+
+            if all_candles:
+                df = pd.DataFrame(all_candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'oi'])
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
+                df = df.sort_values('timestamp').drop_duplicates('timestamp')
                 return df
             else:
-                print(f"HistoryV3Api status error: {api_response}")
+                print(f"No candles found for {instrument_key} using V3 APIs")
             return None
         except Exception as e:
-            print(f"Exception when calling HistoryV3Api: {e}")
+            print(f"Exception when fetching V3 historical: {e}")
             return None
 
     def fetch_instrument_master(self):
