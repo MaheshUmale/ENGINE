@@ -15,8 +15,8 @@ class DataProvider:
     def __init__(self, access_token=ACCESS_TOKEN):
         self.configuration = upstox_client.Configuration()
         self.configuration.access_token = access_token
-        self.api_instance = upstox_client.MarketQuoteApi(upstox_client.ApiClient(self.configuration))
-        self.history_api = upstox_client.HistoryApi(upstox_client.ApiClient(self.configuration))
+        self.api_instance = upstox_client.MarketQuoteV3Api(upstox_client.ApiClient(self.configuration))
+        self.history_api = upstox_client.HistoryV3Api(upstox_client.ApiClient(self.configuration))
         self.options_api = upstox_client.OptionsApi(upstox_client.ApiClient(self.configuration))
         self.instruments = {} # Store current instruments for each index
         self.running = False
@@ -28,18 +28,19 @@ class DataProvider:
         if isinstance(symbol_list, list):
             symbol_list = ",".join(symbol_list)
         try:
-            api_response = self.api_instance.get_full_market_quote(symbol_list, '2.0')
+            # Using V3 get_ltp
+            api_response = self.api_instance.get_ltp(instrument_key=symbol_list)
             # Normalize keys to use | instead of :
             normalized_data = {}
             for k, v in api_response.data.items():
                 normalized_key = k.replace(':', '|')
                 normalized_data[normalized_key] = v
             return normalized_data
-        except ApiException as e:
-            print(f"Exception when calling MarketQuoteApi->get_full_market_quote: {e}")
+        except Exception as e:
+            print(f"Exception when calling MarketQuoteV3Api->get_ltp: {e}")
             return None
 
-    def get_historical_data(self, instrument_key, interval='1minute', to_date=None, from_date=None):
+    def get_historical_data(self, instrument_key, interval=1, to_date=None, from_date=None):
         if to_date is None:
             to_date = datetime.datetime.now().strftime('%Y-%m-%d')
         if from_date is None:
@@ -48,19 +49,23 @@ class DataProvider:
         # If fetching for today, use intraday API
         today_str = datetime.datetime.now().strftime('%Y-%m-%d')
 
+        # V3 interval is usually passed as string in some examples, let's try string
         try:
+            interval_str = str(interval)
             if to_date == today_str:
-                api_response = self.history_api.get_intra_day_candle_data(instrument_key, interval, '2.0')
+                api_response = self.history_api.get_intra_day_candle_data(instrument_key, "minutes", interval_str)
             else:
-                api_response = self.history_api.get_historical_candle_data1(instrument_key, interval, to_date, from_date, '2.0')
+                api_response = self.history_api.get_historical_candle_data1(instrument_key, "minutes", interval_str, to_date, from_date)
 
             if api_response.status == 'success':
                 df = pd.DataFrame(api_response.data.candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'oi'])
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
                 return df
+            else:
+                print(f"HistoryV3Api status error: {api_response}")
             return None
-        except ApiException as e:
-            print(f"Exception when calling HistoryApi: {e}")
+        except Exception as e:
+            print(f"Exception when calling HistoryV3Api: {e}")
             return None
 
     def fetch_instrument_master(self):
@@ -136,35 +141,33 @@ class DataProvider:
 
     async def start_streaming(self, instrument_keys, callback):
         """
-        Starts the Upstox Market Data Feed using the SDK's built-in Feeder.
+        Starts the Upstox Market Data Streamer V3.
         """
+        loop = asyncio.get_event_loop()
         def on_message(message):
             # message is already decoded by the SDK
-            asyncio.run_coroutine_threadsafe(callback(message), asyncio.get_event_loop())
+            asyncio.run_coroutine_threadsafe(callback(message), loop)
 
         def on_error(error):
             print(f"WebSocket Error: {error}")
 
         def on_open():
             print("WebSocket Connection Opened")
-            # Subscribe
-            feeder.subscribe(instrument_keys, "full")
-
-        def on_close(close_status_code, close_msg):
-            print(f"WebSocket Closed: {close_status_code} - {close_msg}")
 
         try:
-            feeder = upstox_client.MarketDataFeed(
+            self.streamer = upstox_client.MarketDataStreamerV3(
                 upstox_client.ApiClient(self.configuration),
-                on_message=on_message,
-                on_error=on_error,
-                on_open=on_open,
-                on_close=on_close
+                instrument_keys,
+                "full"
             )
-            feeder.connect()
+            self.streamer.on("message", on_message)
+            self.streamer.on("error", on_error)
+            self.streamer.on("open", on_open)
+
+            self.streamer.connect()
             self.running = True
         except Exception as e:
-            print(f"Failed to start streaming: {e}")
+            print(f"Failed to start streaming V3: {e}")
 
     def calculate_oi_delta(self, instrument_key, current_oi):
         # Use in-memory cache for performance
