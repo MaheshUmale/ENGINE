@@ -97,7 +97,9 @@ class TradingBot:
         # Run strategy signals on every tick if reference levels exist
         signal = engine.generate_signals(instruments)
         if signal:
-            self.execution.execute_signal(signal)
+            # For live, we can use current index price
+            idx_data = engine.current_data.get(instruments['index'], {})
+            self.execution.execute_signal(signal, index_price=idx_data.get('ltp'))
 
         # Check exits
         if index_name in self.execution.positions:
@@ -108,7 +110,7 @@ class TradingBot:
 
             if engine.check_exit_condition(pd.Series({'side': pos['side']}), idx_data, ce_data, pe_data):
                 exit_price = ce_data.get('ltp') if pos['side'] == 'BUY_CE' else pe_data.get('ltp')
-                self.execution.close_position(index_name, exit_price)
+                self.execution.close_position(index_name, exit_price, index_price=idx_data.get('ltp'))
 
     async def monitor_index(self, index_name):
         print(f"Starting monitor for {index_name}")

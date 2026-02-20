@@ -58,6 +58,7 @@ class Trade(Base):
     instrument_key = Column(String)
     side = Column(String)  # 'BUY' or 'SELL'
     price = Column(Float)
+    index_price = Column(Float)
     quantity = Column(Integer)
     status = Column(String)  # 'OPEN', 'CLOSED'
     pnl = Column(Float, default=0.0)
