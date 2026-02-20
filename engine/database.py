@@ -30,7 +30,7 @@ class Candle(Base):
 class ReferenceLevel(Base):
     __tablename__ = 'reference_levels'
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime)
     index_name = Column(String)
     type = Column(String)  # 'High' or 'Low'
     index_price = Column(Float)
@@ -42,7 +42,7 @@ class ReferenceLevel(Base):
 class Signal(Base):
     __tablename__ = 'signals'
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime)
     index_name = Column(String)
     side = Column(String)  # 'BUY_CE' or 'BUY_PE'
     index_price = Column(Float)
@@ -53,7 +53,7 @@ class Signal(Base):
 class Trade(Base):
     __tablename__ = 'trades'
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime)
     index_name = Column(String)
     instrument_key = Column(String)
     side = Column(String)  # 'BUY' or 'SELL'

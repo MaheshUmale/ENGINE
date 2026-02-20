@@ -50,6 +50,12 @@ class Backtester:
         for i in range(50, len(combined)):
             subset = combined.iloc[:i]
             current = combined.iloc[i]
+            current_time = current['timestamp']
+
+            # Ensure timestamp is naïve for DB if needed, but SQLAlchemy usually handles timezone-aware if configured.
+            # Upstox returns timezone-aware. Let's make it naïve for SQLite just in case.
+            if hasattr(current_time, 'to_pydatetime'):
+                current_time = current_time.to_pydatetime().replace(tzinfo=None)
 
             # Update strategy with current prices
             self.strategy.update_data(details['index'], {'ltp': current['close_idx']})
@@ -67,14 +73,18 @@ class Backtester:
                     current['close_ce'],
                     current['close_pe'],
                     details['ce'],
-                    details['pe']
+                    details['pe'],
+                    timestamp=current_time
                 )
 
             # Check for Signals
             signal = self.strategy.generate_signals(details)
             if signal:
-                # Execute first, then save to avoid DetachedInstanceError during execution
-                self.execution.execute_signal(signal)
+                signal.timestamp = current_time
+                # Check if we already have an open position to avoid duplicate trades
+                if self.index_name not in self.execution.positions:
+                    # Execute first, then save to avoid DetachedInstanceError during execution
+                    self.execution.execute_signal(signal, timestamp=current_time)
                 session = get_session()
                 session.add(signal)
                 session.commit()
@@ -84,13 +94,18 @@ class Backtester:
             if self.index_name in self.execution.positions:
                 pos = self.execution.positions[self.index_name]
                 # Simulating exit check
+                idx_data = {'ltp': current['close_idx']}
+                ce_data = {'ltp': current['close_ce'], 'oi_delta': current['oi_ce'] - combined.iloc[i-1]['oi_ce']}
+                pe_data = {'ltp': current['close_pe'], 'oi_delta': current['oi_pe'] - combined.iloc[i-1]['oi_pe']}
+
                 if self.strategy.check_exit_condition(
                     pd.Series({'side': pos['side']}),
-                    {'ltp': current['close_idx']},
-                    {'ltp': current['close_ce']},
-                    {'ltp': current['close_pe']}
+                    idx_data,
+                    ce_data,
+                    pe_data
                 ):
                     exit_price = current['close_ce'] if pos['side'] == 'BUY_CE' else current['close_pe']
-                    self.execution.close_position(self.index_name, exit_price)
+                    self.execution.close_position(self.index_name, exit_price, timestamp=current_time)
 
         print(f"Backtest complete for {self.index_name}")
+        return combined[['timestamp', 'open_idx', 'high_idx', 'low_idx', 'close_idx']]

@@ -24,7 +24,16 @@ async def main():
         import datetime
         to_date = datetime.datetime.now().strftime('%Y-%m-%d')
         from_date = (datetime.datetime.now() - datetime.timedelta(days=args.days)).strftime('%Y-%m-%d')
-        await backtester.run_backtest(from_date, to_date)
+        candles = await backtester.run_backtest(from_date, to_date)
+
+        if candles is not None:
+            from engine.visualizer import Visualizer
+            vis = Visualizer(args.index)
+            # Rename columns to standard for visualizer
+            candles = candles.rename(columns={
+                'open_idx': 'open', 'high_idx': 'high', 'low_idx': 'low', 'close_idx': 'close'
+            })
+            vis.generate_chart(candles)
 
 if __name__ == "__main__":
     asyncio.run(main())
