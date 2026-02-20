@@ -5,6 +5,9 @@ import datetime
 import json
 import asyncio
 import ssl
+import requests
+import gzip
+import io
 from .config import ACCESS_TOKEN, INDICES
 from .database import get_session, RawTick, Candle
 
@@ -18,6 +21,8 @@ class DataProvider:
         self.instruments = {} # Store current instruments for each index
         self.running = False
         self.oi_cache = {} # instrument_key -> last_oi
+        self.instrument_df = None
+        self.last_master_update = None
 
     def get_market_quote(self, symbol_list):
         if isinstance(symbol_list, list):
@@ -58,9 +63,25 @@ class DataProvider:
             print(f"Exception when calling HistoryApi: {e}")
             return None
 
+    def fetch_instrument_master(self):
+        # Only download if not already downloaded today
+        today = datetime.date.today()
+        if self.instrument_df is not None and self.last_master_update == today:
+            return self.instrument_df
+
+        print("Downloading Upstox Instrument Master...")
+        url = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
+        response = requests.get(url)
+        if response.status_code == 200:
+            with gzip.GzipFile(fileobj=io.BytesIO(response.content)) as f:
+                self.instrument_df = pd.read_json(f)
+                self.last_master_update = today
+                return self.instrument_df
+        return None
+
     async def get_instrument_details(self, index_name):
         """
-        Dynamically discovers ATM options and nearest expiry for the given index using Option Chain API.
+        Dynamically discovers ATM options and nearest expiry for the given index using Instrument Master.
         """
         index_key = INDICES[index_name]['index_key']
         quotes = self.get_market_quote([index_key])
@@ -68,59 +89,50 @@ class DataProvider:
             return None
 
         ltp = quotes[index_key].last_price
+        df = self.fetch_instrument_master()
+        if df is None: return None
 
         try:
-            # Get nearest expiry dates
-            contract_res = self.options_api.get_option_contracts(index_key)
-            if contract_res.status != 'success' or not contract_res.data:
-                return None
+            # For FO instruments, name is just NIFTY/BANKNIFTY
+            fo_name = index_name
 
-            # Sort expiries
-            expiries = sorted(list(set([c.expiry for c in contract_res.data])))
-            nearest_expiry = expiries[0]
+            # --- 1. Current Month Future ---
+            fut_df = df[(df['name'] == fo_name) & (df['instrument_type'] == 'FUT')].sort_values(by='expiry')
 
-            # Get Option Chain for nearest expiry
-            chain_res = self.options_api.get_put_call_option_chain(index_key, nearest_expiry)
-            if chain_res.status != 'success' or not chain_res.data:
-                return None
+            if fut_df.empty: return None
+            current_fut_key = fut_df.iloc[0]['instrument_key']
 
-            # Find ATM strikes
-            # Sort by absolute difference from LTP
-            atm_contracts = sorted(chain_res.data, key=lambda x: abs(x.strike_price - ltp))
-            atm = atm_contracts[0]
+            # --- 2. Nearest Expiry Options ---
+            opt_df = df[(df['name'] == fo_name) & (df['instrument_type'].isin(['CE', 'PE']))].copy()
 
-            ce_key = atm.call_options.instrument_key
-            pe_key = atm.put_options.instrument_key
+            if opt_df.empty: return None
 
-            # For Future, we still need to guess or use another discovery
-            # But we have CE/PE!
-            # Let's use the year and month from the expiry for the Future
-            if isinstance(nearest_expiry, str):
-                expiry_date = datetime.datetime.strptime(nearest_expiry, '%Y-%m-%d')
-            else:
-                expiry_date = nearest_expiry
-            fut_key = f"NSE_FO|{index_name}{expiry_date.strftime('%y%b').upper()}FUT"
+            # Expiry is in ms
+            opt_df['expiry_dt'] = pd.to_datetime(opt_df['expiry'], unit='ms')
+            nearest_expiry = opt_df['expiry_dt'].min()
+            near_opt_df = opt_df[opt_df['expiry_dt'] == nearest_expiry]
+
+            # --- 3. Identify ATM Strike ---
+            unique_strikes = sorted(near_opt_df['strike_price'].unique())
+            atm_strike = min(unique_strikes, key=lambda x: abs(x - ltp))
+
+            ce_row = near_opt_df[(near_opt_df['strike_price'] == atm_strike) & (near_opt_df['instrument_type'] == 'CE')]
+            pe_row = near_opt_df[(near_opt_df['strike_price'] == atm_strike) & (near_opt_df['instrument_type'] == 'PE')]
+
+            if ce_row.empty or pe_row.empty: return None
 
             return {
                 'index': index_key,
-                'ce': ce_key,
-                'pe': pe_key,
-                'fut': fut_key,
+                'ce': ce_row.iloc[0]['instrument_key'],
+                'pe': pe_row.iloc[0]['instrument_key'],
+                'fut': current_fut_key,
                 'ltp': ltp,
-                'strike': atm.strike_price,
-                'expiry': nearest_expiry
+                'strike': float(atm_strike),
+                'expiry': nearest_expiry.strftime('%Y-%m-%d')
             }
         except Exception as e:
             print(f"Discovery Error: {e}")
             return None
-
-    def discover_nearest_expiry(self, index_name):
-        # Placeholder for expiry discovery. In practice, this would parse the instrument master CSV.
-        # For now, we'll return a date that represents the next Thursday (common for NIFTY/BANKNIFTY)
-        today = datetime.date.today()
-        days_ahead = 3 - today.weekday() # Thursday is 3
-        if days_ahead <= 0: days_ahead += 7
-        return today + datetime.timedelta(days_ahead)
 
     async def start_streaming(self, instrument_keys, callback):
         """
