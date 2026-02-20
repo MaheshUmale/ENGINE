@@ -20,20 +20,30 @@ class Backtester:
         details = await self.data_provider.get_instrument_details(self.index_name)
         if not details:
             return
-
-        idx_hist = self.data_provider.get_historical_data(details['index'], from_date=from_date, to_date=to_date)
-        ce_hist = self.data_provider.get_historical_data(details['ce'], from_date=from_date, to_date=to_date)
-        pe_hist = self.data_provider.get_historical_data(details['pe'], from_date=from_date, to_date=to_date)
-        fut_hist = self.data_provider.get_historical_data(details['fut'], from_date=from_date, to_date=to_date)
-
+        print(details)
+        idx_hist = self.data_provider.getData(details['index'], from_date=from_date, to_date=to_date)
+        ce_hist = self.data_provider.getData(details['ce'], from_date=from_date, to_date=to_date)
+        pe_hist = self.data_provider.getData(details['pe'], from_date=from_date, to_date=to_date)
+        fut_hist = self.data_provider.getData(details['fut'], from_date=from_date, to_date=to_date)
+        
         if idx_hist is None or ce_hist is None or pe_hist is None:
             print("Missing historical data for backtest.")
             return
 
         # Align data
+        # first rename column open_interest as oi 
+        # idx_hist = idx_hist.rename(columns={'open_interest': 'oi'})
+        # ce_hist = ce_hist.rename(columns={'open_interest': 'oi'})
+        # pe_hist = pe_hist.rename(columns={'open_interest': 'oi'})
+
         idx_hist = idx_hist.rename(columns={c: f"{c}_idx" for c in idx_hist.columns if c != 'timestamp'})
         ce_hist = ce_hist.rename(columns={c: f"{c}_ce" for c in ce_hist.columns if c != 'timestamp'})
         pe_hist = pe_hist.rename(columns={c: f"{c}_pe" for c in pe_hist.columns if c != 'timestamp'})
+        
+        print(ce_hist.head())
+        print(pe_hist.head())
+        print(fut_hist.head())
+
         if fut_hist is not None:
             fut_hist = fut_hist.rename(columns={c: f"{c}_fut" for c in fut_hist.columns if c != 'timestamp'})
 

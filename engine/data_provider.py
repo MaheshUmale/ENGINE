@@ -39,7 +39,23 @@ class DataProvider:
         except Exception as e:
             print(f"Exception when calling MarketQuoteV3Api->get_ltp: {e}")
             return None
+        
+    def getData(self, instrument_key, interval=1, to_date=None, from_date=None):
+        import upstox_client
+        configuration = upstox_client.Configuration()
+        configuration.access_token = ACCESS_TOKEN
+        apiInstance = upstox_client.HistoryV3Api(upstox_client.ApiClient(configuration))
+        try:
+            response = apiInstance.get_historical_candle_data1(instrument_key, "minutes", "1", to_date, from_date )
 
+            #convert response into DF as timestmap ,o ,h l ,c v, oi 
+            df = pd.DataFrame(response.data.candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'oi'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            return df 
+        # except ApiException as e:
+        except Exception as e:
+            print("Exception when calling HistoryV3Api->get_historical_candle_data1: %s\n" % e)
+            
     def get_historical_data(self, instrument_key, interval=1, to_date=None, from_date=None):
         if to_date is None:
             to_date = datetime.datetime.now().strftime('%Y-%m-%d')
@@ -55,8 +71,8 @@ class DataProvider:
             if to_date == today_str:
                 api_response = self.history_api.get_intra_day_candle_data(instrument_key, "minutes", interval_str)
             else:
-                api_response = self.history_api.get_historical_candle_data1(instrument_key, "minutes", interval_str, to_date, from_date)
-
+                api_response = self.history_api.get_historical_candle_data1(instrument_key, "minutes", 1, to_date, from_date)
+                self.getData(instrument_key, 1, to_date, from_date)
             if api_response.status == 'success':
                 df = pd.DataFrame(api_response.data.candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'oi'])
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
