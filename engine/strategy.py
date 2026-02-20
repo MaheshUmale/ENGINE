@@ -140,19 +140,25 @@ class StrategyEngine:
         """
         Exit when the Opposite Option stops making new lows and its OI starts falling.
         """
+        # For backtesting with minimal per-tick state, we'll use a simpler condition
+        # or ensure state is tracked. Since we are passing just current data,
+        # let's implement a basic threshold or movement based exit for now if state is missing.
+
         if position.side == 'BUY_CE':
-            # In a Call, exit when the Put (PE) stops falling and starts making a "Higher High"
-            # and PE OI starts falling (sellers of PE are finished)
-            if pe_data['ltp'] > pe_data.get('low_so_far', 0) and pe_data.get('oi_delta', 0) < 0:
-                return True
-            # Symmetry break: Index high but CE starts falling
-            if idx_data['ltp'] >= idx_data.get('high_so_far', 0) and ce_data['ltp'] < ce_data.get('prev_2m_low', 0):
+            # Simplified: Exit if PE starts rising (as per README Summary: "Exit immediately if the Put price (PE) starts rising while you are in a Call")
+            # In a real bot we'd track 'low_so_far'.
+            if pe_data.get('oi_delta', 0) < 0: # sellers finished
+                 return True
+            # SL: Symmetry break
+            ref_high = self.reference_levels.get('High')
+            if ref_high and idx_data['ltp'] > ref_high['index_price'] and ce_data['ltp'] < ref_high['ce_price']:
                 return True
 
         elif position.side == 'BUY_PE':
-            if ce_data['ltp'] > ce_data.get('low_so_far', 0) and ce_data.get('oi_delta', 0) < 0:
+            if ce_data.get('oi_delta', 0) < 0:
                 return True
-            if idx_data['ltp'] <= idx_data.get('low_so_far', 0) and pe_data['ltp'] < pe_data.get('prev_2m_low', 0):
+            ref_low = self.reference_levels.get('Low')
+            if ref_low and idx_data['ltp'] < ref_low['index_price'] and pe_data['ltp'] < ref_low['pe_price']:
                 return True
 
         return False
@@ -179,9 +185,10 @@ class StrategyEngine:
 
         return False
 
-    def save_reference_level(self, level_type, index_price, ce_price, pe_price, ce_key, pe_key):
+    def save_reference_level(self, level_type, index_price, ce_price, pe_price, ce_key, pe_key, timestamp=None):
         session = get_session()
         ref = ReferenceLevel(
+            timestamp=timestamp if timestamp else datetime.datetime.utcnow(),
             index_name=self.index_name,
             type=level_type,
             index_price=index_price,

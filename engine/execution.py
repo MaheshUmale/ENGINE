@@ -6,7 +6,7 @@ class ExecutionEngine:
         self.balance = initial_balance
         self.positions = {} # index_name -> position
 
-    def execute_signal(self, signal):
+    def execute_signal(self, signal, timestamp=None):
         """
         Executes a signal by entering a paper trade.
         """
@@ -15,6 +15,7 @@ class ExecutionEngine:
 
         session = get_session()
         trade = Trade(
+            timestamp=timestamp if timestamp else signal.timestamp,
             index_name=signal.index_name,
             instrument_key=signal.side, # Simplified for paper trading
             side='BUY',
@@ -36,7 +37,7 @@ class ExecutionEngine:
         session.close()
         return trade
 
-    def close_position(self, index_name, current_price):
+    def close_position(self, index_name, current_price, timestamp=None):
         """
         Closes an open position.
         """
@@ -48,6 +49,7 @@ class ExecutionEngine:
         trade = session.query(Trade).filter_by(id=pos['trade_id']).first()
 
         exit_trade = Trade(
+            timestamp=timestamp if timestamp else datetime.datetime.utcnow(),
             index_name=index_name,
             instrument_key=pos['side'],
             side='SELL',
