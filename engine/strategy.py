@@ -102,6 +102,10 @@ class StrategyEngine:
                 details['decay_filter'] = True
                 # Could increase conviction score or position size
 
+            # Volume Proxy check (Optional but adds conviction)
+            if idx_data.get('volume', 0) > 0:
+                details['volume_active'] = True
+
             if score >= CONFLUENCE_THRESHOLD:
                 # Check Guardrails
                 if not self.check_guardrails('Bullish', idx_data, ce_data, pe_data, ref_high):
@@ -129,6 +133,9 @@ class StrategyEngine:
                 score += 1
                 details['oi_panic'] = True
 
+            if idx_data.get('volume', 0) > 0:
+                details['volume_active'] = True
+
             if score >= CONFLUENCE_THRESHOLD:
                 if not self.check_guardrails('Bearish', idx_data, ce_data, pe_data, ref_low):
                     return Signal(index_name=self.index_name, side='BUY_PE', index_price=idx_data['ltp'],
@@ -145,10 +152,13 @@ class StrategyEngine:
         # let's implement a basic threshold or movement based exit for now if state is missing.
 
         if position.side == 'BUY_CE':
-            # Simplified: Exit if PE starts rising (as per README Summary: "Exit immediately if the Put price (PE) starts rising while you are in a Call")
-            # In a real bot we'd track 'low_so_far'.
-            if pe_data.get('oi_delta', 0) < 0: # sellers finished
+            # Exit if PE OI starts falling (sellers finished)
+            if pe_data.get('oi_delta', 0) < 0:
                  return True
+            # Exit if CE price drops 20% (Hard SL)
+            entry_price = getattr(position, 'entry_price', 0)
+            if ce_data['ltp'] < entry_price * 0.8:
+                return True
             # SL: Symmetry break
             ref_high = self.reference_levels.get('High')
             if ref_high and idx_data['ltp'] > ref_high['index_price'] and ce_data['ltp'] < ref_high['ce_price']:
@@ -156,6 +166,9 @@ class StrategyEngine:
 
         elif position.side == 'BUY_PE':
             if ce_data.get('oi_delta', 0) < 0:
+                return True
+            entry_price = getattr(position, 'entry_price', 0)
+            if pe_data['ltp'] < entry_price * 0.8:
                 return True
             ref_low = self.reference_levels.get('Low')
             if ref_low and idx_data['ltp'] < ref_low['index_price'] and pe_data['ltp'] < ref_low['pe_price']:
