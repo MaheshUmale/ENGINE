@@ -6,7 +6,7 @@ class ExecutionEngine:
         self.balance = initial_balance
         self.positions = {} # index_name -> position
 
-    def execute_signal(self, signal, timestamp=None):
+    def execute_signal(self, signal, timestamp=None, index_price=None):
         """
         Executes a signal by entering a paper trade.
         """
@@ -20,6 +20,7 @@ class ExecutionEngine:
             instrument_key=signal.side, # Simplified for paper trading
             side='BUY',
             price=signal.option_price,
+            index_price=index_price if index_price else signal.index_price,
             quantity=100, # Fixed quantity for now
             status='OPEN'
         )
@@ -37,7 +38,7 @@ class ExecutionEngine:
         session.close()
         return trade
 
-    def close_position(self, index_name, current_price, timestamp=None):
+    def close_position(self, index_name, current_price, timestamp=None, index_price=None):
         """
         Closes an open position.
         """
@@ -54,6 +55,7 @@ class ExecutionEngine:
             instrument_key=pos['side'],
             side='SELL',
             price=current_price,
+            index_price=index_price,
             quantity=pos['quantity'],
             status='CLOSED',
             pnl=(current_price - pos['entry_price']) * pos['quantity']

@@ -84,7 +84,7 @@ class Backtester:
                 # Check if we already have an open position to avoid duplicate trades
                 if self.index_name not in self.execution.positions:
                     # Execute first, then save to avoid DetachedInstanceError during execution
-                    self.execution.execute_signal(signal, timestamp=current_time)
+                    self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx'])
                 session = get_session()
                 session.add(signal)
                 session.commit()
@@ -105,7 +105,7 @@ class Backtester:
                     pe_data
                 ):
                     exit_price = current['close_ce'] if pos['side'] == 'BUY_CE' else current['close_pe']
-                    self.execution.close_position(self.index_name, exit_price, timestamp=current_time)
+                    self.execution.close_position(self.index_name, exit_price, timestamp=current_time, index_price=current['close_idx'])
 
         print(f"Backtest complete for {self.index_name}")
         return combined[['timestamp', 'open_idx', 'high_idx', 'low_idx', 'close_idx']]

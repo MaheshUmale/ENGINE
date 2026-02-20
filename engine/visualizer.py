@@ -60,16 +60,16 @@ class Visualizer:
         # Trades (Entries and Exits)
         for t in trades:
             color = 'blue' if t.side == 'BUY' else 'orange'
+            # Use index_price if available, fallback to price (option price) if not
+            y_price = t.index_price if t.index_price else t.price
             fig.add_trace(go.Scatter(
                 x=[t.timestamp],
-                y=[t.price], # This is option price, might not align with Index chart well.
-                # Let's try to map to Index price if possible, but Signal already has it.
-                # Actually, let's just use signal price for trade entry marker on Index chart.
+                y=[y_price],
                 mode='markers',
-                marker=dict(symbol='circle', size=8, color=color),
+                marker=dict(symbol='circle', size=10, color=color, line=dict(width=2, color='white')),
                 name=f'Trade {t.side} {t.instrument_key}',
                 hoverinfo='text',
-                text=f"Price: {t.price} PnL: {t.pnl}"
+                text=f"Side: {t.side}<br>Index Price: {t.index_price}<br>Option Price: {t.price}<br>PnL: {t.pnl}"
             ))
 
         # Remove post-market gaps
