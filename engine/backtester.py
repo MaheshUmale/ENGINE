@@ -100,8 +100,16 @@ class Backtester:
                     'ltp': current['close_idx'],
                     'volume': current.get('volume_fut', 0)
                 })
-                self.strategy.update_data(details['ce'], {'ltp': current['close_ce'], 'oi_delta': current['oi_ce'] - combined.iloc[i-1]['oi_ce']})
-                self.strategy.update_data(details['pe'], {'ltp': current['close_pe'], 'oi_delta': current['oi_pe'] - combined.iloc[i-1]['oi_pe']})
+                self.strategy.update_data(details['ce'], {
+                    'ltp': current['close_ce'],
+                    'oi': current['oi_ce'],
+                    'oi_delta': current['oi_ce'] - combined.iloc[i-1]['oi_ce']
+                })
+                self.strategy.update_data(details['pe'], {
+                    'ltp': current['close_pe'],
+                    'oi': current['oi_pe'],
+                    'oi_delta': current['oi_pe'] - combined.iloc[i-1]['oi_pe']
+                })
 
                 # Identify Swings
                 swing_data = subset.rename(columns={'high_idx': 'high', 'low_idx': 'low', 'close_idx': 'close'})
