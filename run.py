@@ -1,0 +1,26 @@
+import asyncio
+import argparse
+from engine.main import TradingBot
+from engine.backtester import Backtester
+
+async def main():
+    parser = argparse.ArgumentParser(description='Triple-Stream Symmetry & Unwinding Trading Engine')
+    parser.add_argument('--mode', choices=['live', 'backtest'], default='live', help='Run mode')
+    parser.add_argument('--index', choices=['NIFTY', 'BANKNIFTY'], default='NIFTY', help='Index for backtest')
+    parser.add_argument('--days', type=int, default=5, help='Number of days for backtest')
+
+    args = parser.parse_args()
+
+    if args.mode == 'live':
+        bot = TradingBot()
+        await bot.run()
+    else:
+        backtester = Backtester(args.index)
+        # Simplified date range
+        import datetime
+        to_date = datetime.datetime.now().strftime('%Y-%m-%d')
+        from_date = (datetime.datetime.now() - datetime.timedelta(days=args.days)).strftime('%Y-%m-%d')
+        await backtester.run_backtest(from_date, to_date)
+
+if __name__ == "__main__":
+    asyncio.run(main())
