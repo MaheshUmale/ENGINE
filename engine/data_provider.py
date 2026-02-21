@@ -142,19 +142,39 @@ class DataProvider:
             unique_strikes = sorted(near_opt_df['strike_price'].unique())
             atm_strike = min(unique_strikes, key=lambda x: abs(x - ltp))
 
-            ce_row = near_opt_df[(near_opt_df['strike_price'] == atm_strike) & (near_opt_df['instrument_type'] == 'CE')]
-            pe_row = near_opt_df[(near_opt_df['strike_price'] == atm_strike) & (near_opt_df['instrument_type'] == 'PE')]
+            # --- 3. Identify the 7 Strikes (3 OTM, 1 ATM, 3 ITM) ---
+            atm_index = unique_strikes.index(atm_strike)
+            start_idx = max(0, atm_index - 3)
+            end_idx = min(len(unique_strikes), atm_index + 4)
+            selected_strikes = unique_strikes[start_idx : end_idx]
 
-            if ce_row.empty or pe_row.empty: return None
+            option_keys = []
+            for strike in selected_strikes:
+                ce_rows = near_opt_df[(near_opt_df['strike_price'] == strike) & (near_opt_df['instrument_type'] == 'CE')]
+                pe_rows = near_opt_df[(near_opt_df['strike_price'] == strike) & (near_opt_df['instrument_type'] == 'PE')]
+
+                if ce_rows.empty or pe_rows.empty: continue
+
+                option_keys.append({
+                    "strike": float(strike),
+                    "ce": ce_rows.iloc[0]['instrument_key'],
+                    "ce_symbol": ce_rows.iloc[0]['trading_symbol'],
+                    "pe": pe_rows.iloc[0]['instrument_key'],
+                    "pe_symbol": pe_rows.iloc[0]['trading_symbol']
+                })
+
+            # Primary ATM CE/PE for strategy
+            atm_info = next(o for o in option_keys if o['strike'] == float(atm_strike))
 
             return {
                 'index': index_key,
-                'ce': ce_row.iloc[0]['instrument_key'],
-                'pe': pe_row.iloc[0]['instrument_key'],
+                'ce': atm_info['ce'],
+                'pe': atm_info['pe'],
                 'fut': current_fut_key,
                 'ltp': ltp,
                 'strike': float(atm_strike),
-                'expiry': nearest_expiry.strftime('%Y-%m-%d')
+                'expiry': nearest_expiry.strftime('%Y-%m-%d'),
+                'option_chain': option_keys # 7 strikes
             }
         except Exception as e:
             print(f"Discovery Error: {e}")
@@ -184,6 +204,9 @@ class DataProvider:
             self.streamer.on("message", on_message)
             self.streamer.on("error", on_error)
             self.streamer.on("open", on_open)
+
+            # Enable auto-reconnect
+            self.streamer.auto_reconnect(True, interval=1, retry_count=10)
 
             self.streamer.connect()
             self.running = True

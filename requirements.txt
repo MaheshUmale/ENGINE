@@ -1,0 +1,8 @@
+upstox-python-sdk
+pandas
+sqlalchemy
+aiohttp
+python-dotenv
+requests
+plotly
+nbformat
