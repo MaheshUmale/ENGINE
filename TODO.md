@@ -53,7 +53,7 @@
 - [x] **Local Metadata Cache**: Save Instrument Master to disk to avoid 20MB download on every startup.
 - [x] **Dynamic Backtesting**: Backtester now periodically updates ATM strikes to reflect mid-day price moves.
 - [x] **Tick Batching**: Optimized database performance by batching raw tick persistence.
-- [ ] **Trailing SL Optimization**: Implement ATR-based dynamic trailing stop losses.
-- [ ] **Multi-Timeframe Confirmation**: Add logic to confirm 1m signals using 5m trend direction.
-- [ ] **Auto-Strike Rollover**: Logic to handle expiry day transitions between current and next week contracts.
-- [ ] **Dashboard Enhancements**: Add equity curve chart and live Greeks display.
+- [x] **Trailing SL Optimization**: Implement ATR-based dynamic trailing stop losses.
+- [x] **Multi-Timeframe Confirmation**: Add logic to confirm 1m signals using 5m trend direction.
+- [x] **Auto-Strike Rollover**: Logic to handle expiry day transitions between current and next week contracts.
+- [x] **Dashboard Enhancements**: Add equity curve chart and performance metrics (Sharpe, Drawdown).

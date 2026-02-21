@@ -2,7 +2,7 @@ import pandas as pd
 import datetime
 from .data_provider import DataProvider
 from .strategy import StrategyEngine
-from .database import get_session, Trade
+from .database import get_session, Trade, Signal, ReferenceLevel, Candle, RawTick
 from .execution import ExecutionEngine
 from .risk_manager import RiskManager
 from .config import INDICES
@@ -15,7 +15,24 @@ class Backtester:
         self.execution = ExecutionEngine()
         self.risk_manager = RiskManager()
 
+    def clean_db(self):
+        print("Cleaning database for new backtest...")
+        session = get_session()
+        try:
+            session.query(Trade).delete()
+            session.query(Signal).delete()
+            session.query(ReferenceLevel).delete()
+            session.query(Candle).delete()
+            session.query(RawTick).delete()
+            session.commit()
+        except Exception as e:
+            print(f"Error cleaning DB: {e}")
+            session.rollback()
+        finally:
+            session.close()
+
     async def run_backtest(self, from_date, to_date):
+        self.clean_db()
         print(f"Starting backtest for {self.index_name} from {from_date} to {to_date}")
 
         # Determine range of dates - include 1 day prior for warm-up
@@ -94,6 +111,12 @@ class Backtester:
             combined = combined.dropna(subset=['close_idx'])
             combined = combined.sort_values('timestamp').ffill().fillna(0)
 
+            # Pre-calculate 5m candles for backtest
+            combined_5m = combined.resample('5min', on='timestamp').agg({
+                'open_idx': 'first', 'high_idx': 'max', 'low_idx': 'min', 'close_idx': 'last'
+            }).ffill()
+            combined_5m.index = combined_5m.index.tz_localize(None)
+
             for i in range(50, len(combined)):
                 subset = combined.iloc[:i]
                 current = combined.iloc[i]
@@ -126,9 +149,23 @@ class Backtester:
                                 'oi': current[f'oi_{key}'],
                                 'oi_delta': current[f'oi_{key}'] - prev_oi
                             })
-                            self.strategy.update_candle(key, current[f'close_{key}'])
+                            self.strategy.update_candle(key, {
+                                'open': current[f'open_{key}'], 'high': current[f'high_{key}'],
+                                'low': current[f'low_{key}'], 'close': current[f'close_{key}']
+                            })
 
-                self.strategy.update_candle(details['index'], current['close_idx'])
+                self.strategy.update_candle(details['index'], {
+                    'open': current['open_idx'], 'high': current['high_idx'],
+                    'low': current['low_idx'], 'close': current['close_idx']
+                })
+
+                # Update 5m candle if at 5m boundary
+                if current_time.minute % 5 == 0:
+                    c5 = combined_5m.loc[current_time.replace(second=0, microsecond=0)]
+                    self.strategy.update_candle(details['index'], {
+                        'open': c5['open_idx'], 'high': c5['high_idx'],
+                        'low': c5['low_idx'], 'close': c5['close_idx']
+                    }, interval=5)
 
                 # Identify Swings
                 swing_data = subset.rename(columns={'high_idx': 'high', 'low_idx': 'low', 'close_idx': 'close'})
@@ -181,6 +218,7 @@ class Backtester:
                         exit_price = ce_data['ltp'] if pos['side'] == 'BUY_CE' else pe_data['ltp']
                         trade = self.execution.close_position(self.index_name, exit_price, timestamp=current_time, index_price=current['close_idx'])
                         if trade:
+                            self.strategy.reset_trailing_sl()
                             self.risk_manager.update_pnl(trade.pnl)
 
             if not is_warmup:
@@ -211,6 +249,12 @@ class Backtester:
             drawdown = cumulative - max_pnl
             max_dd = drawdown.min()
 
+            # Sharpe Ratio (Daily proxy)
+            sharpe = 0
+            if len(pnls) > 1:
+                std = pd.Series(pnls).std()
+                sharpe = (avg_trade / std) * (252**0.5) if std != 0 else 0
+
             print("\n" + "="*30)
             print(f"PERFORMANCE REPORT: {self.index_name}")
             print("="*30)
@@ -219,6 +263,7 @@ class Backtester:
             print(f"Total PnL (Net): {total_pnl:.2f}")
             print(f"Avg per Trade:   {avg_trade:.2f}")
             print(f"Max Drawdown:    {max_dd:.2f}")
+            print(f"Sharpe Ratio:    {sharpe:.2f}")
             print("="*30 + "\n")
 
         return final_df
