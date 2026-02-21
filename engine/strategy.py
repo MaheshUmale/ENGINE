@@ -159,6 +159,8 @@ class StrategyEngine:
             if score >= CONFLUENCE_THRESHOLD:
                 # Check Guardrails
                 if not self.check_guardrails('Bullish', idx_data, ce_data, pe_data, ref_high):
+                    details['ce_key'] = ce_key
+                    details['pe_key'] = pe_key
                     return Signal(index_name=self.index_name, side='BUY_CE', index_price=idx_data['ltp'],
                                   option_price=ce_data['ltp'], confluence_score=score, details=details)
 
@@ -197,6 +199,8 @@ class StrategyEngine:
 
             if score >= CONFLUENCE_THRESHOLD:
                 if not self.check_guardrails('Bearish', idx_data, ce_data, pe_data, ref_low):
+                    details['ce_key'] = ce_key
+                    details['pe_key'] = pe_key
                     return Signal(index_name=self.index_name, side='BUY_PE', index_price=idx_data['ltp'],
                                   option_price=pe_data['ltp'], confluence_score=score, details=details)
 

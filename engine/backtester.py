@@ -129,9 +129,14 @@ class Backtester:
                 swing_data = subset.rename(columns={'high_idx': 'high', 'low_idx': 'low', 'close_idx': 'close'})
                 swing = self.strategy.identify_swing(swing_data[['high', 'low', 'close']])
                 if swing:
+                    ce_key = details['ce']
+                    pe_key = details['pe']
                     self.strategy.save_reference_level(
-                        swing['type'], current['close_idx'], current['close_ce'], current['close_pe'],
-                        details['ce'], details['pe'], timestamp=current_time
+                        swing['type'],
+                        current['close_idx'],
+                        current.get(f'close_{ce_key}', 0),
+                        current.get(f'close_{pe_key}', 0),
+                        ce_key, pe_key, timestamp=current_time
                     )
 
                 # Signals
