@@ -18,11 +18,13 @@ class Backtester:
     async def run_backtest(self, from_date, to_date):
         print(f"Starting backtest for {self.index_name} from {from_date} to {to_date}")
 
-        # Determine range of dates
-        date_range = pd.date_range(start=from_date, end=to_date)
+        # Determine range of dates - include 1 day prior for warm-up
+        start_dt = pd.to_datetime(from_date) - datetime.timedelta(days=2) # 2 days to ensure at least 1 trading day
+        date_range = pd.date_range(start=start_dt, end=to_date)
         all_combined = []
 
         for current_date in date_range:
+            is_warmup = current_date < pd.to_datetime(from_date)
             date_str = current_date.strftime('%Y-%m-%d')
             print(f"Processing date: {date_str}")
 
@@ -88,8 +90,9 @@ class Backtester:
                 combined['volume_fut'] = 0
 
             combined.sort_values('timestamp', inplace=True)
-            combined = combined.dropna(subset=['close_idx']).fillna(0)
-            combined.sort_values('timestamp', inplace=True)
+            # Use forward fill for prices and OI to handle missing candles, then fill remaining NaNs with 0
+            combined = combined.dropna(subset=['close_idx'])
+            combined = combined.sort_values('timestamp').ffill().fillna(0)
 
             for i in range(50, len(combined)):
                 subset = combined.iloc[:i]
@@ -116,10 +119,12 @@ class Backtester:
                     for side in ['ce', 'pe']:
                         key = opt[side]
                         if f'close_{key}' in current:
+                            # Avoid huge OI spikes due to missing data by using current OI if i-1 is missing
+                            prev_oi = combined.iloc[i-1].get(f'oi_{key}', current[f'oi_{key}']) if i > 0 else current[f'oi_{key}']
                             self.strategy.update_data(key, {
                                 'ltp': current[f'close_{key}'],
                                 'oi': current[f'oi_{key}'],
-                                'oi_delta': current[f'oi_{key}'] - combined.iloc[i-1].get(f'oi_{key}', current[f'oi_{key}'])
+                                'oi_delta': current[f'oi_{key}'] - prev_oi
                             })
                             self.strategy.update_candle(key, current[f'close_{key}'])
 
@@ -139,32 +144,37 @@ class Backtester:
                         ce_key, pe_key, timestamp=current_time
                     )
 
-                # Signals
-                signal = self.strategy.generate_signals(details)
-                if signal:
-                    signal.timestamp = current_time
-                    if self.index_name not in self.execution.positions:
-                        # Risk Check
-                        can_trade, _ = self.risk_manager.can_trade(len(self.execution.positions), timestamp=current_time)
-                        if can_trade:
-                            self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx'])
-                    session = get_session()
-                    session.add(signal)
-                    session.commit()
-                    session.close()
+                # Signals (Only if not warmup)
+                if not is_warmup:
+                    signal = self.strategy.generate_signals(details)
+                    if signal:
+                        signal.timestamp = current_time
+                        if self.index_name not in self.execution.positions:
+                            # Risk Check
+                            can_trade, _ = self.risk_manager.can_trade(len(self.execution.positions), timestamp=current_time)
+                            if can_trade:
+                                self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx'])
+                        session = get_session()
+                        session.add(signal)
+                        session.commit()
+                        session.close()
 
                 # Exits
-                if self.index_name in self.execution.positions:
+                if not is_warmup and self.index_name in self.execution.positions:
                     pos = self.execution.positions[self.index_name]
                     # Use the entry strike's data for exit, even if ATM shifted
                     entry_ce_key = pos['ce_key']
                     entry_pe_key = pos['pe_key']
 
                     idx_data = {'ltp': current['close_idx']}
+
+                    prev_oi_ce = combined.iloc[i-1].get(f'oi_{entry_ce_key}', current.get(f'oi_{entry_ce_key}', 0)) if i > 0 else current.get(f'oi_{entry_ce_key}', 0)
+                    prev_oi_pe = combined.iloc[i-1].get(f'oi_{entry_pe_key}', current.get(f'oi_{entry_pe_key}', 0)) if i > 0 else current.get(f'oi_{entry_pe_key}', 0)
+
                     ce_data = {'ltp': current.get(f'close_{entry_ce_key}', 0),
-                               'oi_delta': current.get(f'oi_{entry_ce_key}', 0) - combined.iloc[i-1].get(f'oi_{entry_ce_key}', 0)}
+                               'oi_delta': current.get(f'oi_{entry_ce_key}', 0) - prev_oi_ce}
                     pe_data = {'ltp': current.get(f'close_{entry_pe_key}', 0),
-                               'oi_delta': current.get(f'oi_{entry_pe_key}', 0) - combined.iloc[i-1].get(f'oi_{entry_pe_key}', 0)}
+                               'oi_delta': current.get(f'oi_{entry_pe_key}', 0) - prev_oi_pe}
 
                     from types import SimpleNamespace
                     if self.strategy.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data):
@@ -173,7 +183,8 @@ class Backtester:
                         if trade:
                             self.risk_manager.update_pnl(trade.pnl)
 
-            all_combined.append(combined[['timestamp', 'open_idx', 'high_idx', 'low_idx', 'close_idx']])
+            if not is_warmup:
+                all_combined.append(combined[['timestamp', 'open_idx', 'high_idx', 'low_idx', 'close_idx']])
 
         if not all_combined:
             print("No data processed for the given date range.")

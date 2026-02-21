@@ -14,10 +14,12 @@ STRIKE_UPDATE_THRESHOLD = 25  # Index move in points
 # Instruments to monitor
 INDICES = {
     'NIFTY': {
-        'index_key': 'NSE_INDEX|Nifty 50'
+        'index_key': 'NSE_INDEX|Nifty 50',
+        'lot_size': 75
     },
     'BANKNIFTY': {
-        'index_key': 'NSE_INDEX|Nifty Bank'
+        'index_key': 'NSE_INDEX|Nifty Bank',
+        'lot_size': 15
     }
 }
 
