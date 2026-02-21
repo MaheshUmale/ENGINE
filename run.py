@@ -39,4 +39,15 @@ async def main():
             vis.generate_chart(candles)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import sys
+    # Special handling for dashboard mode to avoid nested asyncio loops
+    if "dashboard" in sys.argv:
+        from engine.database import init_db
+        init_db()
+        from engine.dashboard import run_dashboard
+        run_dashboard()
+    else:
+        try:
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            pass
