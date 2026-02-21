@@ -3,6 +3,7 @@ __pycache__/
 *$py.class
 .env
 trading_engine.db
+nse_instruments.json
 .jules/
 node_modules/
 package-lock.json

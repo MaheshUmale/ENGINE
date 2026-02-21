@@ -8,6 +8,7 @@ import ssl
 import requests
 import gzip
 import io
+import os
 from .config import ACCESS_TOKEN, INDICES
 from .database import get_session, RawTick, Candle
 
@@ -90,22 +91,43 @@ class DataProvider:
             return None
 
     def fetch_instrument_master(self):
-        # Only download if not already downloaded today
+        # Local cache file
+        cache_file = "nse_instruments.json"
         today = datetime.date.today()
+
+        # Only download if not already downloaded today
         if self.instrument_df is not None and self.last_master_update == today:
             return self.instrument_df
 
+        # Check for local file
+        if os.path.exists(cache_file):
+            mtime = datetime.date.fromtimestamp(os.path.getmtime(cache_file))
+            if mtime == today:
+                print("Loading Upstox Instrument Master from local cache...")
+                self.instrument_df = pd.read_json(cache_file)
+                self.last_master_update = today
+                return self.instrument_df
+
         print("Downloading Upstox Instrument Master...")
         url = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
-        response = requests.get(url)
-        if response.status_code == 200:
-            with gzip.GzipFile(fileobj=io.BytesIO(response.content)) as f:
-                self.instrument_df = pd.read_json(f)
-                self.last_master_update = today
+        try:
+            response = requests.get(url, timeout=30)
+            if response.status_code == 200:
+                with gzip.GzipFile(fileobj=io.BytesIO(response.content)) as f:
+                    self.instrument_df = pd.read_json(f)
+                    self.last_master_update = today
+                    # Save to local cache
+                    self.instrument_df.to_json(cache_file)
+                    return self.instrument_df
+        except Exception as e:
+            print(f"Error downloading master: {e}")
+            if os.path.exists(cache_file):
+                print("Fallback to old cache...")
+                self.instrument_df = pd.read_json(cache_file)
                 return self.instrument_df
         return None
 
-    async def get_instrument_details(self, index_name):
+    async def get_instrument_details(self, index_name, reference_date=None):
         """
         Dynamically discovers ATM options and nearest expiry for the given index using Instrument Master.
         """
@@ -130,12 +152,28 @@ class DataProvider:
 
             # --- 2. Nearest Expiry Options ---
             opt_df = df[(df['name'] == fo_name) & (df['instrument_type'].isin(['CE', 'PE']))].copy()
-
             if opt_df.empty: return None
 
             # Expiry is in ms
             opt_df['expiry_dt'] = pd.to_datetime(opt_df['expiry'], unit='ms')
-            nearest_expiry = opt_df['expiry_dt'].min()
+
+            # Use current LTP date if possible to find future expiry
+            # During backtest, we might be on an older date
+            # Let's find the minimum expiry that is >= today or >= a provided reference date
+            # For simplicity here, we'll find expiries >= the latest candle timestamp we might have
+            # But wait, we just want the absolute nearest one available in the master for that name.
+
+            # Find the closest expiry to the reference date
+            if reference_date:
+                ref_dt = pd.to_datetime(reference_date)
+                future_expiries = [e for e in opt_df['expiry_dt'].unique() if e >= ref_dt]
+                if future_expiries:
+                    nearest_expiry = min(future_expiries)
+                else:
+                    nearest_expiry = opt_df['expiry_dt'].min() # Fallback
+            else:
+                nearest_expiry = opt_df['expiry_dt'].min()
+
             near_opt_df = opt_df[opt_df['expiry_dt'] == nearest_expiry]
 
             # --- 3. Identify ATM Strike ---
@@ -212,6 +250,28 @@ class DataProvider:
             self.running = True
         except Exception as e:
             print(f"Failed to start streaming V3: {e}")
+
+    def subscribe(self, instrument_keys, mode="full"):
+        """
+        Subscribes to more instrument keys.
+        """
+        if self.running and self.streamer:
+            try:
+                self.streamer.subscribe(instrument_keys, mode)
+                print(f"Subscribed to: {instrument_keys}")
+            except Exception as e:
+                print(f"Failed to subscribe: {e}")
+
+    def unsubscribe(self, instrument_keys):
+        """
+        Unsubscribes from instrument keys.
+        """
+        if self.running and self.streamer:
+            try:
+                self.streamer.unsubscribe(instrument_keys)
+                print(f"Unsubscribed from: {instrument_keys}")
+            except Exception as e:
+                print(f"Failed to unsubscribe: {e}")
 
     def calculate_oi_delta(self, instrument_key, current_oi):
         # Use in-memory cache for performance

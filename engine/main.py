@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import pandas as pd
 from .data_provider import DataProvider
 from .strategy import StrategyEngine
 from .execution import ExecutionEngine
@@ -17,6 +18,8 @@ class TradingBot:
         self.alert_manager = AlertManager()
         self.instruments = {}
         self.candle_buffers = {} # instrument -> interval -> current_candle
+        self.tick_batch = []
+        self.last_batch_save = datetime.datetime.now()
 
     async def handle_tick(self, message):
         if not isinstance(message, dict):
@@ -38,12 +41,10 @@ class TradingBot:
 
             if ltp is None: continue
 
-            # Persist raw tick
-            session = get_session()
-            tick = RawTick(instrument_key=key, ltp=ltp, volume=vtt, oi=oi)
-            session.add(tick)
-            session.commit()
-            session.close()
+            # Batch raw tick for better performance
+            self.tick_batch.append(RawTick(instrument_key=key, ltp=ltp, volume=vtt, oi=oi))
+            if len(self.tick_batch) >= 100 or (datetime.datetime.now() - self.last_batch_save).seconds > 5:
+                await self.save_tick_batch()
 
             # Update engine with latest tick data
             for index_name, engine in self.engines.items():
@@ -148,6 +149,18 @@ class TradingBot:
                         f"<b>TRADE CLOSED</b>\nIndex: {index_name}\nPnL: {trade.pnl:.2f}"
                     ))
 
+    async def save_tick_batch(self):
+        if not self.tick_batch: return
+        try:
+            session = get_session()
+            session.add_all(self.tick_batch)
+            session.commit()
+            session.close()
+            self.tick_batch = []
+            self.last_batch_save = datetime.datetime.now()
+        except Exception as e:
+            print(f"Error saving tick batch: {e}")
+
     async def monitor_index(self, index_name):
         print(f"Starting monitor for {index_name}")
         last_update_price = 0
@@ -161,11 +174,22 @@ class TradingBot:
             threshold = 25 if index_name == 'NIFTY' else 100
 
             if abs(current_price - last_update_price) >= threshold or last_update_price == 0:
+                old_details = self.instruments.get(index_name)
                 details = await self.data_provider.get_instrument_details(index_name)
                 if details:
                     self.instruments[index_name] = details
                     last_update_price = details['ltp']
                     print(f"Updated instruments for {index_name} (Price: {last_update_price}): {details}")
+
+                    # Update subscriptions
+                    new_keys = [details['ce'], details['pe']]
+                    if old_details:
+                        old_keys = [old_details['ce'], old_details['pe']]
+                        to_unsubscribe = [k for k in old_keys if k not in new_keys]
+                        if to_unsubscribe:
+                            self.data_provider.unsubscribe(to_unsubscribe)
+
+                    self.data_provider.subscribe(new_keys)
 
             await asyncio.sleep(60) # Check every minute
 

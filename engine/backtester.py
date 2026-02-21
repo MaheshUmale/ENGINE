@@ -2,7 +2,7 @@ import pandas as pd
 import datetime
 from .data_provider import DataProvider
 from .strategy import StrategyEngine
-from .database import get_session
+from .database import get_session, Trade
 from .execution import ExecutionEngine
 from .risk_manager import RiskManager
 from .config import INDICES
@@ -51,7 +51,7 @@ class Backtester:
             original_ltp_method = self.data_provider.get_market_quote
             self.data_provider.get_market_quote = lambda x: {INDICES[self.index_name]['index_key']: type('obj', (object,), {'last_price': open_price})}
 
-            details = await self.data_provider.get_instrument_details(self.index_name)
+            details = await self.data_provider.get_instrument_details(self.index_name, reference_date=date_str)
             self.data_provider.get_market_quote = original_ltp_method # Restore
 
             if not details:
@@ -60,21 +60,26 @@ class Backtester:
             print(f"Instruments for {date_str}: CE={details['ce']}, PE={details['pe']}, ATM={details['strike']}")
 
             idx_hist = self.data_provider.get_historical_data(details['index'], from_date=date_str, to_date=date_str)
-            ce_hist = self.data_provider.get_historical_data(details['ce'], from_date=date_str, to_date=date_str)
-            pe_hist = self.data_provider.get_historical_data(details['pe'], from_date=date_str, to_date=date_str)
+            # To support dynamic strike updates, we fetch the whole 7-strike chain
+            chain_data = {}
+            for opt in details['option_chain']:
+                ce_d = self.data_provider.get_historical_data(opt['ce'], from_date=date_str, to_date=date_str)
+                pe_d = self.data_provider.get_historical_data(opt['pe'], from_date=date_str, to_date=date_str)
+                if ce_d is not None: chain_data[opt['ce']] = ce_d
+                if pe_d is not None: chain_data[opt['pe']] = pe_d
+
             fut_hist = self.data_provider.get_historical_data(details['fut'], from_date=date_str, to_date=date_str)
 
-            if idx_hist is None or idx_hist.empty or ce_hist is None or ce_hist.empty or pe_hist is None or pe_hist.empty:
-                print(f"Skipping {date_str} due to missing data.")
+            if idx_hist is None or idx_hist.empty:
+                print(f"Skipping {date_str} due to missing index data.")
                 continue
 
             # Align data
-            idx_hist = idx_hist.rename(columns={c: f"{c}_idx" for c in idx_hist.columns if c != 'timestamp'})
-            ce_hist = ce_hist.rename(columns={c: f"{c}_ce" for c in ce_hist.columns if c != 'timestamp'})
-            pe_hist = pe_hist.rename(columns={c: f"{c}_pe" for c in pe_hist.columns if c != 'timestamp'})
+            combined = idx_hist.rename(columns={c: f"{c}_idx" for c in idx_hist.columns if c != 'timestamp'})
 
-            combined = pd.merge(idx_hist, ce_hist, on='timestamp', how='outer')
-            combined = pd.merge(combined, pe_hist, on='timestamp', how='outer')
+            for k, df in chain_data.items():
+                df = df.rename(columns={c: f"{c}_{k}" for c in df.columns if c != 'timestamp'})
+                combined = pd.merge(combined, df, on='timestamp', how='outer')
 
             if fut_hist is not None and not fut_hist.empty:
                 fut_hist = fut_hist.rename(columns={c: f"{c}_fut" for c in fut_hist.columns if c != 'timestamp'})
@@ -86,37 +91,39 @@ class Backtester:
             combined = combined.dropna(subset=['close_idx']).fillna(0)
             combined.sort_values('timestamp', inplace=True)
 
-            # Reset strategy state for new day? (Optional, let's keep levels for now but usually we reset)
-            # self.strategy.reference_levels = {'High': None, 'Low': None}
-
             for i in range(50, len(combined)):
                 subset = combined.iloc[:i]
                 current = combined.iloc[i]
                 current_time = current['timestamp']
 
+                # Dynamic ATM Selection
+                current_idx_price = current['close_idx']
+                best_strike = min(details['option_chain'], key=lambda x: abs(x['strike'] - current_idx_price))
+                details['ce'] = best_strike['ce']
+                details['pe'] = best_strike['pe']
+                details['strike'] = best_strike['strike']
+
                 if hasattr(current_time, 'to_pydatetime'):
                     current_time = current_time.to_pydatetime().replace(tzinfo=None)
 
-                # Update strategy
+                # Update strategy with all chain data for context, but primary ce/pe for signal
                 self.strategy.update_data(details['index'], {
                     'ltp': current['close_idx'],
                     'volume': current.get('volume_fut', 0)
                 })
-                self.strategy.update_data(details['ce'], {
-                    'ltp': current['close_ce'],
-                    'oi': current['oi_ce'],
-                    'oi_delta': current['oi_ce'] - combined.iloc[i-1]['oi_ce']
-                })
-                self.strategy.update_data(details['pe'], {
-                    'ltp': current['close_pe'],
-                    'oi': current['oi_pe'],
-                    'oi_delta': current['oi_pe'] - combined.iloc[i-1]['oi_pe']
-                })
 
-                # Update candle history for Velocity and RS
+                for opt in details['option_chain']:
+                    for side in ['ce', 'pe']:
+                        key = opt[side]
+                        if f'close_{key}' in current:
+                            self.strategy.update_data(key, {
+                                'ltp': current[f'close_{key}'],
+                                'oi': current[f'oi_{key}'],
+                                'oi_delta': current[f'oi_{key}'] - combined.iloc[i-1].get(f'oi_{key}', current[f'oi_{key}'])
+                            })
+                            self.strategy.update_candle(key, current[f'close_{key}'])
+
                 self.strategy.update_candle(details['index'], current['close_idx'])
-                self.strategy.update_candle(details['ce'], current['close_ce'])
-                self.strategy.update_candle(details['pe'], current['close_pe'])
 
                 # Identify Swings
                 swing_data = subset.rename(columns={'high_idx': 'high', 'low_idx': 'low', 'close_idx': 'close'})
@@ -144,13 +151,19 @@ class Backtester:
                 # Exits
                 if self.index_name in self.execution.positions:
                     pos = self.execution.positions[self.index_name]
+                    # Use the entry strike's data for exit, even if ATM shifted
+                    entry_ce_key = pos['ce_key']
+                    entry_pe_key = pos['pe_key']
+
                     idx_data = {'ltp': current['close_idx']}
-                    ce_data = {'ltp': current['close_ce'], 'oi_delta': current['oi_ce'] - combined.iloc[i-1]['oi_ce']}
-                    pe_data = {'ltp': current['close_pe'], 'oi_delta': current['oi_pe'] - combined.iloc[i-1]['oi_pe']}
+                    ce_data = {'ltp': current.get(f'close_{entry_ce_key}', 0),
+                               'oi_delta': current.get(f'oi_{entry_ce_key}', 0) - combined.iloc[i-1].get(f'oi_{entry_ce_key}', 0)}
+                    pe_data = {'ltp': current.get(f'close_{entry_pe_key}', 0),
+                               'oi_delta': current.get(f'oi_{entry_pe_key}', 0) - combined.iloc[i-1].get(f'oi_{entry_pe_key}', 0)}
 
                     from types import SimpleNamespace
                     if self.strategy.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data):
-                        exit_price = current['close_ce'] if pos['side'] == 'BUY_CE' else current['close_pe']
+                        exit_price = ce_data['ltp'] if pos['side'] == 'BUY_CE' else pe_data['ltp']
                         trade = self.execution.close_position(self.index_name, exit_price, timestamp=current_time, index_price=current['close_idx'])
                         if trade:
                             self.risk_manager.update_pnl(trade.pnl)
@@ -163,4 +176,33 @@ class Backtester:
 
         final_df = pd.concat(all_combined).sort_values('timestamp').drop_duplicates('timestamp')
         print(f"Backtest complete for {self.index_name}")
+
+        # Calculate Performance KPIs
+        session = get_session()
+        closed_trades = session.query(Trade).filter_by(index_name=self.index_name, status='CLOSED', side='SELL').all()
+        session.close()
+
+        if closed_trades:
+            pnls = [t.pnl for t in closed_trades]
+            total_pnl = sum(pnls)
+            wins = [p for p in pnls if p > 0]
+            win_rate = (len(wins) / len(pnls)) * 100
+            avg_trade = total_pnl / len(pnls)
+
+            # Simplified Drawdown
+            cumulative = pd.Series(pnls).cumsum()
+            max_pnl = cumulative.expanding().max()
+            drawdown = cumulative - max_pnl
+            max_dd = drawdown.min()
+
+            print("\n" + "="*30)
+            print(f"PERFORMANCE REPORT: {self.index_name}")
+            print("="*30)
+            print(f"Total Trades:    {len(pnls)}")
+            print(f"Win Rate:        {win_rate:.2f}%")
+            print(f"Total PnL (Net): {total_pnl:.2f}")
+            print(f"Avg per Trade:   {avg_trade:.2f}")
+            print(f"Max Drawdown:    {max_dd:.2f}")
+            print("="*30 + "\n")
+
         return final_df

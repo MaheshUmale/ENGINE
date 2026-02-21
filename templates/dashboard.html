@@ -31,15 +31,31 @@
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-2">
             <div class="card text-center">
                 <div class="card-body">
-                    <h5 class="card-title">Completed Trades</h5>
+                    <h5 class="card-title">Trades</h5>
                     <p class="card-text h2">{{ trade_count }}</p>
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-2">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h5 class="card-title">Win Rate</h5>
+                    <p class="card-text h2">{{ "%.1f"|format(win_rate) }}%</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h5 class="card-title">Avg PnL</h5>
+                    <p class="card-text h2">{{ "%.2f"|format(avg_pnl) }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
             <div class="card text-center">
                 <div class="card-body">
                     <h5 class="card-title">Status</h5>
