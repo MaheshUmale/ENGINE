@@ -257,6 +257,37 @@ class StrategyEngine:
 
         return False
 
+    def get_trend_state(self, side):
+        """
+        Returns True if the current index trend is in sync with the requested side.
+        Used for Multi-Index Sync enhancement.
+        """
+        # We need the index key from INDICES, but StrategyEngine doesn't have it directly.
+        # However, we can find it in self.current_data if we know the index_name.
+        # Actually, let's assume the index key is in current_data.
+        # A better way is to pass the index_key or find it.
+        from .config import INDICES
+        idx_key = INDICES[self.index_name]['index_key']
+
+        if idx_key not in self.current_data:
+            return True # Neutral if no data
+
+        ltp = self.current_data[idx_key]['ltp']
+
+        if side == 'BUY_CE':
+            ref = self.reference_levels.get('High')
+            if ref:
+                return ltp > ref['index_price']
+            return ltp > self.candle_history.get(idx_key, [ltp])[0] # Above "open" of history
+
+        elif side == 'BUY_PE':
+            ref = self.reference_levels.get('Low')
+            if ref:
+                return ltp < ref['index_price']
+            return ltp < self.candle_history.get(idx_key, [ltp])[0] # Below "open" of history
+
+        return True
+
     def save_reference_level(self, level_type, index_price, ce_price, pe_price, ce_key, pe_key, timestamp=None):
         session = get_session()
         ref = ReferenceLevel(
