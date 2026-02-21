@@ -88,8 +88,9 @@ class Backtester:
                 combined['volume_fut'] = 0
 
             combined.sort_values('timestamp', inplace=True)
-            combined = combined.dropna(subset=['close_idx']).fillna(0)
-            combined.sort_values('timestamp', inplace=True)
+            # Use forward fill for prices and OI to handle missing candles, then fill remaining NaNs with 0
+            combined = combined.dropna(subset=['close_idx'])
+            combined = combined.sort_values('timestamp').ffill().fillna(0)
 
             for i in range(50, len(combined)):
                 subset = combined.iloc[:i]
@@ -116,10 +117,12 @@ class Backtester:
                     for side in ['ce', 'pe']:
                         key = opt[side]
                         if f'close_{key}' in current:
+                            # Avoid huge OI spikes due to missing data by using current OI if i-1 is missing
+                            prev_oi = combined.iloc[i-1].get(f'oi_{key}', current[f'oi_{key}']) if i > 0 else current[f'oi_{key}']
                             self.strategy.update_data(key, {
                                 'ltp': current[f'close_{key}'],
                                 'oi': current[f'oi_{key}'],
-                                'oi_delta': current[f'oi_{key}'] - combined.iloc[i-1].get(f'oi_{key}', current[f'oi_{key}'])
+                                'oi_delta': current[f'oi_{key}'] - prev_oi
                             })
                             self.strategy.update_candle(key, current[f'close_{key}'])
 
@@ -161,10 +164,14 @@ class Backtester:
                     entry_pe_key = pos['pe_key']
 
                     idx_data = {'ltp': current['close_idx']}
+
+                    prev_oi_ce = combined.iloc[i-1].get(f'oi_{entry_ce_key}', current.get(f'oi_{entry_ce_key}', 0)) if i > 0 else current.get(f'oi_{entry_ce_key}', 0)
+                    prev_oi_pe = combined.iloc[i-1].get(f'oi_{entry_pe_key}', current.get(f'oi_{entry_pe_key}', 0)) if i > 0 else current.get(f'oi_{entry_pe_key}', 0)
+
                     ce_data = {'ltp': current.get(f'close_{entry_ce_key}', 0),
-                               'oi_delta': current.get(f'oi_{entry_ce_key}', 0) - combined.iloc[i-1].get(f'oi_{entry_ce_key}', 0)}
+                               'oi_delta': current.get(f'oi_{entry_ce_key}', 0) - prev_oi_ce}
                     pe_data = {'ltp': current.get(f'close_{entry_pe_key}', 0),
-                               'oi_delta': current.get(f'oi_{entry_pe_key}', 0) - combined.iloc[i-1].get(f'oi_{entry_pe_key}', 0)}
+                               'oi_delta': current.get(f'oi_{entry_pe_key}', 0) - prev_oi_pe}
 
                     from types import SimpleNamespace
                     if self.strategy.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data):

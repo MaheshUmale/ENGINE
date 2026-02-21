@@ -1,4 +1,5 @@
 from .database import get_session, Trade
+from .config import INDICES
 import datetime
 
 class ExecutionEngine:
@@ -18,8 +19,13 @@ class ExecutionEngine:
 
         # Apply slippage to entry price
         entry_price = signal.option_price * (1 + self.slippage)
+
+        # Use proper lot size
+        lot_size = INDICES.get(signal.index_name, {}).get('lot_size', 1)
+        quantity = lot_size
+
         # Turnover-based commission + fixed charge
-        entry_cost = (entry_price * 100 * self.commission_rate) + self.fixed_charge
+        entry_cost = (entry_price * quantity * self.commission_rate) + self.fixed_charge
         self.balance -= entry_cost
 
         session = get_session()
@@ -30,7 +36,7 @@ class ExecutionEngine:
             side='BUY',
             price=entry_price,
             index_price=index_price if index_price else signal.index_price,
-            quantity=100, # Fixed quantity for now
+            quantity=quantity,
             status='OPEN'
         )
         session.add(trade)
@@ -40,7 +46,7 @@ class ExecutionEngine:
             'trade_id': trade.id,
             'side': signal.side,
             'entry_price': signal.option_price,
-            'quantity': 100,
+            'quantity': quantity,
             'ce_key': signal.details.get('ce_key'),
             'pe_key': signal.details.get('pe_key')
         }
