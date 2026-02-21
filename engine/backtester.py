@@ -16,31 +16,37 @@ class Backtester:
     async def run_backtest(self, from_date, to_date):
         print(f"Starting backtest for {self.index_name} from {from_date} to {to_date}")
 
-        # Determine range of dates
-        date_range = pd.date_range(start=from_date, end=to_date)
-        all_combined = []
+        # 1. Fetch historical data for Index, CE, PE, and Futures
+        # (This is a simplified backtest using available data)
+        details = await self.data_provider.get_instrument_details(self.index_name)
+        if not details:
+            return
+        print(details)
+        idx_hist = self.data_provider.getData(details['index'], from_date=from_date, to_date=to_date)
+        ce_hist = self.data_provider.getData(details['ce'], from_date=from_date, to_date=to_date)
+        pe_hist = self.data_provider.getData(details['pe'], from_date=from_date, to_date=to_date)
+        fut_hist = self.data_provider.getData(details['fut'], from_date=from_date, to_date=to_date)
+        
+        if idx_hist is None or ce_hist is None or pe_hist is None:
+            print("Missing historical data for backtest.")
+            return
 
-        for current_date in date_range:
-            date_str = current_date.strftime('%Y-%m-%d')
-            print(f"Processing date: {date_str}")
+        # Align data
+        # first rename column open_interest as oi 
+        # idx_hist = idx_hist.rename(columns={'open_interest': 'oi'})
+        # ce_hist = ce_hist.rename(columns={'open_interest': 'oi'})
+        # pe_hist = pe_hist.rename(columns={'open_interest': 'oi'})
 
-            # 1. Fetch historical data for Index to get ATM at market open
-            idx_morning = self.data_provider.get_historical_data(INDICES[self.index_name]['index_key'], from_date=date_str, to_date=date_str)
+        idx_hist = idx_hist.rename(columns={c: f"{c}_idx" for c in idx_hist.columns if c != 'timestamp'})
+        ce_hist = ce_hist.rename(columns={c: f"{c}_ce" for c in ce_hist.columns if c != 'timestamp'})
+        pe_hist = pe_hist.rename(columns={c: f"{c}_pe" for c in pe_hist.columns if c != 'timestamp'})
+        
+        print(ce_hist.head())
+        print(pe_hist.head())
+        print(fut_hist.head())
 
-            # If today and empty, try to get LTP for discovery
-            if (idx_morning is None or idx_morning.empty) and date_str == datetime.datetime.now().strftime('%Y-%m-%d'):
-                print(f"No historical data for today ({date_str}), using live LTP for discovery...")
-                quotes = self.data_provider.get_market_quote([INDICES[self.index_name]['index_key']])
-                if quotes and INDICES[self.index_name]['index_key'] in quotes:
-                    open_price = quotes[INDICES[self.index_name]['index_key']].last_price
-                else:
-                    continue
-            elif idx_morning is not None and not idx_morning.empty:
-                # Upstox returns candles sorted DESC usually, let's sort ASC
-                idx_morning = idx_morning.sort_values('timestamp')
-                open_price = idx_morning.iloc[0]['close']
-            else:
-                continue
+        if fut_hist is not None:
+            fut_hist = fut_hist.rename(columns={c: f"{c}_fut" for c in fut_hist.columns if c != 'timestamp'})
 
             # We need ATM at open (approx 9:15-9:20)
 
