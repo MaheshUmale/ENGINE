@@ -40,7 +40,9 @@ class ExecutionEngine:
             'trade_id': trade.id,
             'side': signal.side,
             'entry_price': signal.option_price,
-            'quantity': 100
+            'quantity': 100,
+            'ce_key': signal.details.get('ce_key'),
+            'pe_key': signal.details.get('pe_key')
         }
 
         print(f"Executed BUY for {signal.index_name}: {signal.side} at {signal.option_price}")
