@@ -4,7 +4,7 @@ from .data_provider import DataProvider
 from .strategy import StrategyEngine
 from .execution import ExecutionEngine
 from .config import INDICES, ACCESS_TOKEN
-from .database import init_db, get_session, RawTick
+from .database import init_db, get_session, RawTick, Candle
 
 class TradingBot:
     def __init__(self):
@@ -33,6 +33,13 @@ class TradingBot:
                 if vtt: vtt = float(vtt) # vtt is string in V3
 
             if ltp is None: continue
+
+            # Persist raw tick
+            session = get_session()
+            tick = RawTick(instrument_key=key, ltp=ltp, volume=vtt, oi=oi)
+            session.add(tick)
+            session.commit()
+            session.close()
 
             # Update engine with latest tick data
             for index_name, engine in self.engines.items():

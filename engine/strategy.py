@@ -93,6 +93,11 @@ class StrategyEngine:
             # 4. The Panic (OI): ATM Call OI decreasing, ATM Put OI increasing
             # This requires historical OI change, which we should get from data_provider or ticks
             # For now, let's assume we have it in the data dictionary
+            details['ce_oi'] = float(ce_data.get('oi', 0))
+            details['ce_oi_delta'] = float(ce_data.get('oi_delta', 0))
+            details['pe_oi'] = float(pe_data.get('oi', 0))
+            details['pe_oi_delta'] = float(pe_data.get('oi_delta', 0))
+
             if ce_data.get('oi_delta', 0) < 0 and pe_data.get('oi_delta', 0) > 0:
                 score += 1
                 details['oi_panic'] = True
@@ -128,6 +133,11 @@ class StrategyEngine:
             if ce_data['ltp'] < ref_low['ce_price']:
                 score += 1
                 details['ce_breakdown'] = True
+
+            details['ce_oi'] = float(ce_data.get('oi', 0))
+            details['ce_oi_delta'] = float(ce_data.get('oi_delta', 0))
+            details['pe_oi'] = float(pe_data.get('oi', 0))
+            details['pe_oi_delta'] = float(pe_data.get('oi_delta', 0))
 
             if pe_data.get('oi_delta', 0) < 0 and ce_data.get('oi_delta', 0) > 0:
                 score += 1
