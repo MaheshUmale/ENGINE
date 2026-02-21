@@ -22,15 +22,18 @@ async def home(request: Request):
 
     conn = sqlite3.connect(DB_PATH)
     try:
-        trades = pd.read_sql("SELECT * FROM trades ORDER BY timestamp DESC LIMIT 50", conn)
+        # Fetch data for display
+        trades_display = pd.read_sql("SELECT * FROM trades ORDER BY timestamp DESC LIMIT 50", conn)
         signals = pd.read_sql("SELECT * FROM signals ORDER BY timestamp DESC LIMIT 50", conn)
 
+        # Fetch data for summary calculations (full history of closed trades)
+        all_closed_trades = pd.read_sql("SELECT pnl FROM trades WHERE side = 'SELL' AND status = 'CLOSED'", conn)
+
         # Calculate summary
-        closed_trades = trades[trades['side'] == 'SELL']
-        total_pnl = closed_trades['pnl'].sum() if not closed_trades.empty else 0
-        trade_count = len(closed_trades)
-        win_rate = (len(closed_trades[closed_trades['pnl'] > 0]) / trade_count * 100) if trade_count > 0 else 0
-        avg_pnl = closed_trades['pnl'].mean() if not closed_trades.empty else 0
+        total_pnl = all_closed_trades['pnl'].sum() if not all_closed_trades.empty else 0
+        trade_count = len(all_closed_trades)
+        win_rate = (len(all_closed_trades[all_closed_trades['pnl'] > 0]) / trade_count * 100) if trade_count > 0 else 0
+        avg_pnl = all_closed_trades['pnl'].mean() if not all_closed_trades.empty else 0
     except Exception as e:
         return f"Error reading database: {e}"
     finally:
@@ -38,7 +41,7 @@ async def home(request: Request):
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
-        "trades": trades.to_dict(orient="records"),
+        "trades": trades_display.to_dict(orient="records"),
         "signals": signals.to_dict(orient="records"),
         "total_pnl": total_pnl,
         "trade_count": trade_count,
