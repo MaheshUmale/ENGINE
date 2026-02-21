@@ -43,14 +43,17 @@
 
 ## Improvisations & Enhancements
 
-### Pending / In-Progress
-- [ ] **Multi-Strike Discovery**: Implement discovery of 7 strikes (3 OTM, 1 ATM, 3 ITM) as per user's preferred logic.
-- [ ] **Advanced Swing Detection**: Refine swing detection using multi-candle confirmation (ZigZag style).
-- [ ] **Realistic Execution**: Add slippage (0.1%) and transaction cost simulation to Paper Trading.
-- [ ] **Robust Streamer**: Implement auto-reconnect and error recovery for `MarketDataStreamerV3`.
-- [ ] **Project Setup**: Create `requirements.txt` and standardize folder structure.
+### Completed
+- [x] **Multi-Strike Discovery**: Implement discovery of 7 strikes (3 OTM, 1 ATM, 3 ITM) using Instrument Master.
+- [x] **Advanced Swing Detection**: Refined swing detection using multi-candle (2-candle) confirmation.
+- [x] **Realistic Execution**: Added slippage (0.1%) and transaction fee simulation (brokerage + turnover-based).
+- [x] **Robust Streamer**: Enabled auto-reconnect and error recovery for `MarketDataStreamerV3`.
+- [x] **Project Setup**: Created `requirements.txt` and modularized engine components.
+- [x] **Risk Management**: Implemented `RiskManager` with Max Daily Loss and Max Positions limits.
+- [x] **Web Dashboard**: Created a FastAPI-based dashboard to view live signals and trade history.
+- [x] **Alert System**: Implemented `AlertManager` with Telegram notification support.
 
-### Proposed
-- [ ] **Dashboard**: Simple web dashboard (FastAPI + Jinja2) to view live trades and signals.
-- [ ] **Risk Management**: Implement Max Daily Loss and Max Open Positions.
-- [ ] **Alerts**: Integrate Telegram/Discord notifications for signals.
+### Proposed / Future
+- [ ] **Trailing SL Optimization**: Dynamic trailing SL based on ATR or Volatility.
+- [ ] **Multi-Timeframe Confluence**: Confirm signals on both 1m and 5m charts.
+- [ ] **Auto-Strike Rollover**: Seamless transition between weekly expiries during trading hours.
