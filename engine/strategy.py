@@ -358,13 +358,19 @@ class StrategyEngine:
             ref = self.reference_levels.get('High')
             if ref:
                 return ltp > ref['index_price']
-            return ltp > self.candle_history.get(idx_key, [ltp])[0] # Above "open" of history
+            hist = self.candle_history.get(idx_key)
+            if hist:
+                return ltp > hist[0]['open']
+            return True
 
         elif side == 'BUY_PE':
             ref = self.reference_levels.get('Low')
             if ref:
                 return ltp < ref['index_price']
-            return ltp < self.candle_history.get(idx_key, [ltp])[0] # Below "open" of history
+            hist = self.candle_history.get(idx_key)
+            if hist:
+                return ltp < hist[0]['open']
+            return True
 
         return True
 
