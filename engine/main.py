@@ -6,7 +6,7 @@ from .strategy import StrategyEngine
 from .execution import ExecutionEngine
 from .risk_manager import RiskManager
 from .alerts import AlertManager
-from .config import INDICES, ACCESS_TOKEN, SWING_WINDOW
+from .config import INDICES, ACCESS_TOKEN, SWING_WINDOW, ENABLE_INDEX_SYNC
 from .database import init_db, get_session, RawTick, Candle
 
 class TradingBot:
@@ -118,6 +118,18 @@ class TradingBot:
         # Run strategy signals on every tick if reference levels exist
         signal = engine.generate_signals(instruments)
         if signal:
+            # Enhancement: Multi-Index Sync Check
+            if ENABLE_INDEX_SYNC:
+                other_sync = True
+                for other_name, other_engine in self.engines.items():
+                    if other_name == index_name: continue
+                    if not other_engine.get_trend_state(signal.side):
+                        other_sync = False
+                        break
+                if not other_sync:
+                    # Optional: Log that sync failed
+                    return
+
             # Risk Management
             can_trade, reason = self.risk_manager.can_trade(len(self.execution.positions))
             if not can_trade:
