@@ -8,10 +8,44 @@ class StrategyEngine:
         self.index_name = index_name
         self.reference_levels = {'High': None, 'Low': None}
         self.positions = []
-        self.current_data = {} # instrument_key -> latest_data
+        self.current_data = {} # instrument_key -> latest_data (tick)
+        self.candle_history = {} # instrument_key -> list of last 5 candle closes
 
     def update_data(self, instrument_key, data):
+        """Update current tick data."""
         self.current_data[instrument_key] = data
+
+    def update_candle(self, instrument_key, candle_close):
+        """Update historical candle close data for velocity and RS."""
+        if instrument_key not in self.candle_history:
+            self.candle_history[instrument_key] = []
+
+        self.candle_history[instrument_key].append(candle_close)
+        if len(self.candle_history[instrument_key]) > 5:
+            self.candle_history[instrument_key].pop(0)
+
+    def calculate_velocity(self, instrument_key):
+        """Price Velocity: Rate of change over 3 candles."""
+        prices = self.candle_history.get(instrument_key, [])
+        if len(prices) < 4:
+            return 0
+        return (prices[-1] - prices[-4]) / 3
+
+    def calculate_relative_strength(self, option_key, index_key):
+        """Relative Strength: (Option % Change) / (Index % Change)."""
+        opt_prices = self.candle_history.get(option_key, [])
+        idx_prices = self.candle_history.get(index_key, [])
+
+        if len(opt_prices) < 2 or len(idx_prices) < 2:
+            return 0
+
+        opt_change = (opt_prices[-1] - opt_prices[-2]) / opt_prices[-2] if opt_prices[-2] != 0 else 0
+        idx_change = (idx_prices[-1] - idx_prices[-2]) / idx_prices[-2] if idx_prices[-2] != 0 else 0
+
+        if idx_change == 0:
+            return 0
+
+        return opt_change / idx_change
 
     def identify_swing(self, candles):
         """
@@ -91,8 +125,6 @@ class StrategyEngine:
                 details['pe_breakdown'] = True
 
             # 4. The Panic (OI): ATM Call OI decreasing, ATM Put OI increasing
-            # This requires historical OI change, which we should get from data_provider or ticks
-            # For now, let's assume we have it in the data dictionary
             details['ce_oi'] = float(ce_data.get('oi', 0))
             details['ce_oi_delta'] = float(ce_data.get('oi_delta', 0))
             details['pe_oi'] = float(pe_data.get('oi', 0))
@@ -102,10 +134,15 @@ class StrategyEngine:
                 score += 1
                 details['oi_panic'] = True
 
-            # Decay Filter Bonus
+            # Calculate and log metrics
+            details['ce_velocity'] = self.calculate_velocity(ce_key)
+            details['ce_rs'] = self.calculate_relative_strength(ce_key, idx_key)
+
+            # Decay Filter Bonus (Anti-Theta)
             if self.check_decay_filter(idx_data['ltp'], ce_data['ltp'], ref_high):
                 details['decay_filter'] = True
-                # Could increase conviction score or position size
+                # Boost score if decay filter passes even if other conditions are marginal
+                score += 1
 
             # Volume Proxy check (Optional but adds conviction)
             if idx_data.get('volume', 0) > 0:
@@ -143,6 +180,10 @@ class StrategyEngine:
                 score += 1
                 details['oi_panic'] = True
 
+            # Metrics
+            details['pe_velocity'] = self.calculate_velocity(pe_key)
+            details['pe_rs'] = self.calculate_relative_strength(pe_key, idx_key)
+
             if idx_data.get('volume', 0) > 0:
                 details['volume_active'] = True
 
@@ -157,10 +198,6 @@ class StrategyEngine:
         """
         Exit when the Opposite Option stops making new lows and its OI starts falling.
         """
-        # For backtesting with minimal per-tick state, we'll use a simpler condition
-        # or ensure state is tracked. Since we are passing just current data,
-        # let's implement a basic threshold or movement based exit for now if state is missing.
-
         if position.side == 'BUY_CE':
             # Exit if PE OI starts falling (sellers finished)
             if pe_data.get('oi_delta', 0) < 0:
