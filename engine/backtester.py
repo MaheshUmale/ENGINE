@@ -18,11 +18,13 @@ class Backtester:
     async def run_backtest(self, from_date, to_date):
         print(f"Starting backtest for {self.index_name} from {from_date} to {to_date}")
 
-        # Determine range of dates
-        date_range = pd.date_range(start=from_date, end=to_date)
+        # Determine range of dates - include 1 day prior for warm-up
+        start_dt = pd.to_datetime(from_date) - datetime.timedelta(days=2) # 2 days to ensure at least 1 trading day
+        date_range = pd.date_range(start=start_dt, end=to_date)
         all_combined = []
 
         for current_date in date_range:
+            is_warmup = current_date < pd.to_datetime(from_date)
             date_str = current_date.strftime('%Y-%m-%d')
             print(f"Processing date: {date_str}")
 
@@ -142,22 +144,23 @@ class Backtester:
                         ce_key, pe_key, timestamp=current_time
                     )
 
-                # Signals
-                signal = self.strategy.generate_signals(details)
-                if signal:
-                    signal.timestamp = current_time
-                    if self.index_name not in self.execution.positions:
-                        # Risk Check
-                        can_trade, _ = self.risk_manager.can_trade(len(self.execution.positions), timestamp=current_time)
-                        if can_trade:
-                            self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx'])
-                    session = get_session()
-                    session.add(signal)
-                    session.commit()
-                    session.close()
+                # Signals (Only if not warmup)
+                if not is_warmup:
+                    signal = self.strategy.generate_signals(details)
+                    if signal:
+                        signal.timestamp = current_time
+                        if self.index_name not in self.execution.positions:
+                            # Risk Check
+                            can_trade, _ = self.risk_manager.can_trade(len(self.execution.positions), timestamp=current_time)
+                            if can_trade:
+                                self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx'])
+                        session = get_session()
+                        session.add(signal)
+                        session.commit()
+                        session.close()
 
                 # Exits
-                if self.index_name in self.execution.positions:
+                if not is_warmup and self.index_name in self.execution.positions:
                     pos = self.execution.positions[self.index_name]
                     # Use the entry strike's data for exit, even if ATM shifted
                     entry_ce_key = pos['ce_key']
@@ -180,7 +183,8 @@ class Backtester:
                         if trade:
                             self.risk_manager.update_pnl(trade.pnl)
 
-            all_combined.append(combined[['timestamp', 'open_idx', 'high_idx', 'low_idx', 'close_idx']])
+            if not is_warmup:
+                all_combined.append(combined[['timestamp', 'open_idx', 'high_idx', 'low_idx', 'close_idx']])
 
         if not all_combined:
             print("No data processed for the given date range.")

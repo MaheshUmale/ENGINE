@@ -61,3 +61,9 @@ The strategy uses two primary "Unwinding" exit triggers:
 *   **Slippage**: 0.1% applied to both Entry and Exit.
 *   **Transaction Costs**: Turnover-based commission (0.05%) + fixed GST/STT proxy charges (₹20 per side).
 *   **Lot Sizing**: NIFTY (75), BANKNIFTY (15).
+
+## 10. Strategy Warmup
+To ensure the engine has immediate access to structural levels upon startup:
+*   **Historical Ingestion**: The bot fetches and processes the last 2 days of historical data for the Index and relevant ATM options.
+*   **State Initialization**: Reference levels (Highs/Lows) and candle history (for Velocity/RS) are pre-calculated before the live stream starts.
+*   **Continuity**: This prevents "flying blind" during the first few minutes of a live session or backtest.

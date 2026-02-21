@@ -6,7 +6,7 @@ from .strategy import StrategyEngine
 from .execution import ExecutionEngine
 from .risk_manager import RiskManager
 from .alerts import AlertManager
-from .config import INDICES, ACCESS_TOKEN
+from .config import INDICES, ACCESS_TOKEN, SWING_WINDOW
 from .database import init_db, get_session, RawTick, Candle
 
 class TradingBot:
@@ -193,21 +193,84 @@ class TradingBot:
 
             await asyncio.sleep(60) # Check every minute
 
+    async def warmup(self):
+        print("Performing Strategy Warmup...")
+        for name, engine in self.engines.items():
+            details = self.instruments.get(name)
+            if not details: continue
+
+            # Fetch last 2 days of data for Index, CE, PE
+            idx_hist = self.data_provider.get_historical_data(details['index'], interval=1)
+            ce_hist = self.data_provider.get_historical_data(details['ce'], interval=1)
+            pe_hist = self.data_provider.get_historical_data(details['pe'], interval=1)
+
+            if idx_hist is not None and not idx_hist.empty:
+                print(f"Ingesting historical candles for {name} warm-up")
+
+                # Align data
+                idx_hist = idx_hist.rename(columns={c: f"{c}_idx" for c in idx_hist.columns if c != 'timestamp'})
+                ce_hist = ce_hist.rename(columns={c: f"{c}_ce" for c in ce_hist.columns if c != 'timestamp'}) if ce_hist is not None else None
+                pe_hist = pe_hist.rename(columns={c: f"{c}_pe" for c in pe_hist.columns if c != 'timestamp'}) if pe_hist is not None else None
+
+                combined = idx_hist
+                if ce_hist is not None: combined = pd.merge(combined, ce_hist, on='timestamp', how='left')
+                if pe_hist is not None: combined = pd.merge(combined, pe_hist, on='timestamp', how='left')
+
+                combined = combined.sort_values('timestamp').ffill().fillna(0)
+
+                for i in range(SWING_WINDOW + 2, len(combined)):
+                    subset = combined.iloc[:i]
+                    current = combined.iloc[i]
+
+                    # Update engine candle history
+                    engine.update_candle(details['index'], current['close_idx'])
+                    if 'close_ce' in current: engine.update_candle(details['ce'], current['close_ce'])
+                    if 'close_pe' in current: engine.update_candle(details['pe'], current['close_pe'])
+
+                    # Identify Swings
+                    swing_data = subset.rename(columns={'high_idx': 'high', 'low_idx': 'low', 'close_idx': 'close'})
+                    swing = engine.identify_swing(swing_data[['high', 'low', 'close']])
+                    if swing:
+                        engine.save_reference_level(
+                            swing['type'],
+                            current['close_idx'],
+                            current.get('close_ce', 0),
+                            current.get('close_pe', 0),
+                            details['ce'], details['pe'],
+                            timestamp=current['timestamp'].to_pydatetime()
+                        )
+
+                # Save historical candles to DB if not present
+                session = get_session()
+                for _, row in idx_hist.tail(100).iterrows():
+                    exists = session.query(Candle).filter_by(instrument_key=details['index'], timestamp=row['timestamp']).first()
+                    if not exists:
+                        db_candle = Candle(
+                            instrument_key=details['index'], interval=1, timestamp=row['timestamp'],
+                            open=row['open_idx'], high=row['high_idx'], low=row['low_idx'],
+                            close=row['close_idx'], volume=row['volume_idx']
+                        )
+                        session.add(db_candle)
+                session.commit()
+                session.close()
+
     async def run(self):
         init_db()
         print("Trading Bot Started")
 
-        # Start monitoring tasks for each index
-        monitoring_tasks = [self.monitor_index(name) for name in INDICES]
-
-        # Start streaming (this would block or run in background)
-        # For the purpose of this task, we'll simulate the start
+        # 1. Initial Discovery
         all_keys = []
         for name in INDICES:
             details = await self.data_provider.get_instrument_details(name)
             if details:
                 self.instruments[name] = details
                 all_keys.extend([details['index'], details['ce'], details['pe'], details['fut']])
+
+        # 2. Warmup strategy with historical data
+        await self.warmup()
+
+        # Start monitoring tasks for each index
+        monitoring_tasks = [self.monitor_index(name) for name in INDICES]
 
         # Start the WebSocket stream
         await self.data_provider.start_streaming(all_keys, self.handle_tick)
