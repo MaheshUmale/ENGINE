@@ -2,9 +2,11 @@ from .database import get_session, Trade
 import datetime
 
 class ExecutionEngine:
-    def __init__(self, initial_balance=1000000, slippage=0.001):
+    def __init__(self, initial_balance=1000000, slippage=0.001, commission_rate=0.0005, fixed_charge=20):
         self.balance = initial_balance
         self.slippage = slippage # 0.1% default
+        self.commission_rate = commission_rate # 0.05%
+        self.fixed_charge = fixed_charge # Flat INR 20 per trade
         self.positions = {} # index_name -> position
 
     def execute_signal(self, signal, timestamp=None, index_price=None):
@@ -16,6 +18,9 @@ class ExecutionEngine:
 
         # Apply slippage to entry price
         entry_price = signal.option_price * (1 + self.slippage)
+        # Turnover-based commission + fixed charge
+        entry_cost = (entry_price * 100 * self.commission_rate) + self.fixed_charge
+        self.balance -= entry_cost
 
         session = get_session()
         trade = Trade(
@@ -55,6 +60,12 @@ class ExecutionEngine:
 
         # Apply slippage to exit price
         exit_price = current_price * (1 - self.slippage)
+        exit_cost = (exit_price * pos['quantity'] * self.commission_rate) + self.fixed_charge
+
+        pnl_gross = (exit_price - pos['entry_price']) * pos['quantity']
+        pnl_net = pnl_gross - exit_cost
+
+        self.balance += pnl_net
 
         exit_trade = Trade(
             timestamp=timestamp if timestamp else datetime.datetime.utcnow(),
@@ -65,7 +76,7 @@ class ExecutionEngine:
             index_price=index_price,
             quantity=pos['quantity'],
             status='CLOSED',
-            pnl=(exit_price - pos['entry_price']) * pos['quantity']
+            pnl=pnl_net
         )
 
         trade.status = 'CLOSED'

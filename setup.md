@@ -21,6 +21,8 @@ The bot uses environment variables for sensitive data. Create a `.env` file in t
 
 ```env
 UPSTOX_ACCESS_TOKEN=your_upstox_access_token_here
+TELEGRAM_BOT_TOKEN=your_bot_token_here (optional)
+TELEGRAM_CHAT_ID=your_chat_id_here (optional)
 ```
 
 ## Project Structure
@@ -57,6 +59,15 @@ To start monitoring and trading NIFTY and BANKNIFTY in real-time:
 ```bash
 python3 run.py --mode live
 ```
+
+### 3. Running the Dashboard
+
+To view your trades and signals in a web browser:
+
+```bash
+python3 run.py --mode dashboard
+```
+Then visit `http://localhost:8000`.
 
 ## Strategy Overview
 

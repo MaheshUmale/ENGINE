@@ -50,9 +50,9 @@ class StrategyEngine:
     def identify_swing(self, candles):
         """
         Identify Significant Swings where a 'Wall' exists.
-        Index hits a New High (or Low) and pulls back.
+        Advanced: Hits a New High/Low and confirms with 2-candle pullback.
         """
-        if len(candles) < 3:
+        if len(candles) < 5:
             return None
 
         # Simple swing detection: local high/low in the window
@@ -60,16 +60,24 @@ class StrategyEngine:
         current_high = last_n['high'].max()
         current_low = last_n['low'].min()
 
-        # If current candle is a pullback from the high
-        last_candle = candles.iloc[-1]
+        # Confirmation logic:
+        # High formed: Extreme High at candle i-2, then candle i-1 and i have lower highs
+        # Low formed: Extreme Low at candle i-2, then candle i-1 and i have higher lows
+        c = candles.iloc[-1]
+        p = candles.iloc[-2]
+        pp = candles.iloc[-3]
 
-        # Bullish Wall Identification
-        if last_candle['high'] < current_high and candles.iloc[-2]['high'] == current_high:
-            return {'type': 'High', 'price': current_high}
+        # Bullish Wall Identification (Resistance)
+        if pp['high'] == current_high:
+            if p['high'] < pp['high'] and c['high'] < p['high']:
+                # Pullback confirmed by 2 consecutive lower highs
+                return {'type': 'High', 'price': current_high}
 
-        # Bearish Wall Identification
-        if last_candle['low'] > current_low and candles.iloc[-2]['low'] == current_low:
-            return {'type': 'Low', 'price': current_low}
+        # Bearish Wall Identification (Support)
+        if pp['low'] == current_low:
+            if p['low'] > pp['low'] and c['low'] > p['low']:
+                # Pullback confirmed by 2 consecutive higher lows
+                return {'type': 'Low', 'price': current_low}
 
         return None
 

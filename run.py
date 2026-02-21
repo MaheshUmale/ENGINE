@@ -5,7 +5,7 @@ from engine.backtester import Backtester
 
 async def main():
     parser = argparse.ArgumentParser(description='Triple-Stream Symmetry & Unwinding Trading Engine')
-    parser.add_argument('--mode', choices=['live', 'backtest'], default='live', help='Run mode')
+    parser.add_argument('--mode', choices=['live', 'backtest', 'dashboard'], default='live', help='Run mode')
     parser.add_argument('--index', choices=['NIFTY', 'BANKNIFTY'], default='NIFTY', help='Index for backtest')
     parser.add_argument('--days', type=int, default=5, help='Number of days for backtest')
 
@@ -18,6 +18,9 @@ async def main():
     if args.mode == 'live':
         bot = TradingBot()
         await bot.run()
+    elif args.mode == 'dashboard':
+        from engine.dashboard import run_dashboard
+        run_dashboard()
     else:
         backtester = Backtester(args.index)
         # Simplified date range

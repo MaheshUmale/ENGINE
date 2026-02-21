@@ -4,6 +4,7 @@ from .data_provider import DataProvider
 from .strategy import StrategyEngine
 from .database import get_session
 from .execution import ExecutionEngine
+from .risk_manager import RiskManager
 from .config import INDICES
 
 class Backtester:
@@ -12,6 +13,7 @@ class Backtester:
         self.data_provider = DataProvider()
         self.strategy = StrategyEngine(index_name)
         self.execution = ExecutionEngine()
+        self.risk_manager = RiskManager()
 
     async def run_backtest(self, from_date, to_date):
         print(f"Starting backtest for {self.index_name} from {from_date} to {to_date}")
@@ -130,7 +132,10 @@ class Backtester:
                 if signal:
                     signal.timestamp = current_time
                     if self.index_name not in self.execution.positions:
-                        self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx'])
+                        # Risk Check
+                        can_trade, _ = self.risk_manager.can_trade(len(self.execution.positions), timestamp=current_time)
+                        if can_trade:
+                            self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx'])
                     session = get_session()
                     session.add(signal)
                     session.commit()
@@ -146,7 +151,9 @@ class Backtester:
                     from types import SimpleNamespace
                     if self.strategy.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data):
                         exit_price = current['close_ce'] if pos['side'] == 'BUY_CE' else current['close_pe']
-                        self.execution.close_position(self.index_name, exit_price, timestamp=current_time, index_price=current['close_idx'])
+                        trade = self.execution.close_position(self.index_name, exit_price, timestamp=current_time, index_price=current['close_idx'])
+                        if trade:
+                            self.risk_manager.update_pnl(trade.pnl)
 
             all_combined.append(combined[['timestamp', 'open_idx', 'high_idx', 'low_idx', 'close_idx']])
 

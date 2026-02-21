@@ -3,6 +3,8 @@ import datetime
 from .data_provider import DataProvider
 from .strategy import StrategyEngine
 from .execution import ExecutionEngine
+from .risk_manager import RiskManager
+from .alerts import AlertManager
 from .config import INDICES, ACCESS_TOKEN
 from .database import init_db, get_session, RawTick, Candle
 
@@ -11,6 +13,8 @@ class TradingBot:
         self.data_provider = DataProvider(ACCESS_TOKEN)
         self.engines = {name: StrategyEngine(name) for name in INDICES}
         self.execution = ExecutionEngine()
+        self.risk_manager = RiskManager()
+        self.alert_manager = AlertManager()
         self.instruments = {}
         self.candle_buffers = {} # instrument -> interval -> current_candle
 
@@ -113,9 +117,20 @@ class TradingBot:
         # Run strategy signals on every tick if reference levels exist
         signal = engine.generate_signals(instruments)
         if signal:
+            # Risk Management
+            can_trade, reason = self.risk_manager.can_trade(len(self.execution.positions))
+            if not can_trade:
+                print(f"Trade blocked by Risk Manager: {reason}")
+                return
+
             # For live, we can use current index price
             idx_data = engine.current_data.get(instruments['index'], {})
             self.execution.execute_signal(signal, index_price=idx_data.get('ltp'))
+
+            # Send Alert
+            asyncio.create_task(self.alert_manager.send_notification(
+                f"<b>SIGNAL: {signal.side}</b>\nIndex: {signal.index_name}\nPrice: {signal.index_price}"
+            ))
 
         # Check exits
         if index_name in self.execution.positions:
@@ -126,18 +141,33 @@ class TradingBot:
 
             if engine.check_exit_condition(pd.Series({'side': pos['side']}), idx_data, ce_data, pe_data):
                 exit_price = ce_data.get('ltp') if pos['side'] == 'BUY_CE' else pe_data.get('ltp')
-                self.execution.close_position(index_name, exit_price, index_price=idx_data.get('ltp'))
+                trade = self.execution.close_position(index_name, exit_price, index_price=idx_data.get('ltp'))
+                if trade:
+                    self.risk_manager.update_pnl(trade.pnl)
+                    asyncio.create_task(self.alert_manager.send_notification(
+                        f"<b>TRADE CLOSED</b>\nIndex: {index_name}\nPnL: {trade.pnl:.2f}"
+                    ))
 
     async def monitor_index(self, index_name):
         print(f"Starting monitor for {index_name}")
+        last_update_price = 0
         while True:
-            # Update instruments every 5 minutes
-            details = await self.data_provider.get_instrument_details(index_name)
-            if details:
-                self.instruments[index_name] = details
-                print(f"Updated instruments for {index_name}: {details}")
+            # Update instruments every 5 minutes or on large price move
+            current_price = 0
+            idx_key = INDICES[index_name]['index_key']
+            if index_name in self.engines and idx_key in self.engines[index_name].current_data:
+                current_price = self.engines[index_name].current_data[idx_key].get('ltp', 0)
 
-            await asyncio.sleep(300) # 5 minutes
+            threshold = 25 if index_name == 'NIFTY' else 100
+
+            if abs(current_price - last_update_price) >= threshold or last_update_price == 0:
+                details = await self.data_provider.get_instrument_details(index_name)
+                if details:
+                    self.instruments[index_name] = details
+                    last_update_price = details['ltp']
+                    print(f"Updated instruments for {index_name} (Price: {last_update_price}): {details}")
+
+            await asyncio.sleep(60) # Check every minute
 
     async def run(self):
         init_db()
