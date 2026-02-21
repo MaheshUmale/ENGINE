@@ -2,8 +2,9 @@ from .database import get_session, Trade
 import datetime
 
 class ExecutionEngine:
-    def __init__(self, initial_balance=1000000):
+    def __init__(self, initial_balance=1000000, slippage=0.001):
         self.balance = initial_balance
+        self.slippage = slippage # 0.1% default
         self.positions = {} # index_name -> position
 
     def execute_signal(self, signal, timestamp=None, index_price=None):
@@ -13,13 +14,16 @@ class ExecutionEngine:
         if signal.index_name in self.positions:
             return None # Already in a position for this index
 
+        # Apply slippage to entry price
+        entry_price = signal.option_price * (1 + self.slippage)
+
         session = get_session()
         trade = Trade(
             timestamp=timestamp if timestamp else signal.timestamp,
             index_name=signal.index_name,
             instrument_key=signal.side, # Simplified for paper trading
             side='BUY',
-            price=signal.option_price,
+            price=entry_price,
             index_price=index_price if index_price else signal.index_price,
             quantity=100, # Fixed quantity for now
             status='OPEN'
@@ -49,16 +53,19 @@ class ExecutionEngine:
         session = get_session()
         trade = session.query(Trade).filter_by(id=pos['trade_id']).first()
 
+        # Apply slippage to exit price
+        exit_price = current_price * (1 - self.slippage)
+
         exit_trade = Trade(
             timestamp=timestamp if timestamp else datetime.datetime.utcnow(),
             index_name=index_name,
             instrument_key=pos['side'],
             side='SELL',
-            price=current_price,
+            price=exit_price,
             index_price=index_price,
             quantity=pos['quantity'],
             status='CLOSED',
-            pnl=(current_price - pos['entry_price']) * pos['quantity']
+            pnl=(exit_price - pos['entry_price']) * pos['quantity']
         )
 
         trade.status = 'CLOSED'
