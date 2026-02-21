@@ -54,18 +54,19 @@ class TradingBot:
         engine = self.engines[index_name]
         instruments = self.instruments[index_name]
 
-        # We only need candles for the Index to identify swings
-        if key == instruments['index']:
-            # Simplified aggregation for 1m candles
-            now = datetime.datetime.now()
-            minute = now.replace(second=0, microsecond=0)
+        now = datetime.datetime.now()
+        minute = now.replace(second=0, microsecond=0)
 
-            if index_name not in self.candle_buffers:
-                self.candle_buffers[index_name] = {'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
+        buffer_key = f"{index_name}_{key}"
+        if buffer_key not in self.candle_buffers:
+            self.candle_buffers[buffer_key] = {'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
 
-            buffer = self.candle_buffers[index_name]
-            if minute > buffer['timestamp']:
-                # Candle closed
+        buffer = self.candle_buffers[buffer_key]
+        if minute > buffer['timestamp']:
+            # Candle closed
+            engine.update_candle(key, buffer['close'])
+
+            if key == instruments['index']:
                 candle_df = pd.DataFrame([buffer])
 
                 # Phase I: Identify Swing
@@ -100,14 +101,14 @@ class TradingBot:
                 session.commit()
                 session.close()
 
-                # Reset buffer
-                self.candle_buffers[index_name] = {'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
-            else:
-                # Update buffer
-                buffer['high'] = max(buffer['high'], price)
-                buffer['low'] = min(buffer['low'], price)
-                buffer['close'] = price
-                buffer['volume'] += volume if volume else 0
+            # Reset buffer
+            self.candle_buffers[buffer_key] = {'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
+        else:
+            # Update buffer
+            buffer['high'] = max(buffer['high'], price)
+            buffer['low'] = min(buffer['low'], price)
+            buffer['close'] = price
+            buffer['volume'] += volume if volume else 0
 
         # Run strategy signals on every tick if reference levels exist
         signal = engine.generate_signals(instruments)

@@ -2,10 +2,9 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
- 
+
 # Upstox Access Token
-# ACCESS_TOKEN = os.getenv('UPSTOX_ACCESS_TOKEN')
-ACCESS_TOKEN = 'eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI3NkFGMzUiLCJqdGkiOiI2OTk3ZDY4YWRjZWU0NTYxNDE3ZDFjNTEiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MTU1ODUzOCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcxNjI0ODAwfQ.WhVaC7KnTLO69PbhL4w_4qDk2EBp_SQhPToIBgL89rY' # os.getenv('UPSTOX_ACCESS_TOKEN')
+ACCESS_TOKEN = os.getenv('UPSTOX_ACCESS_TOKEN')
 
 # Strategy Parameters
 TIMEFRAMES = [1, 3, 5]  # In minutes

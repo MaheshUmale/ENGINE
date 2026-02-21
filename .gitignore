@@ -1,4 +1,4 @@
-*/__pycache__/*
+__pycache__/
 *.py[cod]
 *$py.class
 .env
@@ -6,4 +6,3 @@ trading_engine.db
 .jules/
 node_modules/
 package-lock.json
-*.pyc
