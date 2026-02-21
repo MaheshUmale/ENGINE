@@ -150,14 +150,24 @@ class TradingBot:
 
     async def monitor_index(self, index_name):
         print(f"Starting monitor for {index_name}")
+        last_update_price = 0
         while True:
-            # Update instruments every 5 minutes
-            details = await self.data_provider.get_instrument_details(index_name)
-            if details:
-                self.instruments[index_name] = details
-                print(f"Updated instruments for {index_name}: {details}")
+            # Update instruments every 5 minutes or on large price move
+            current_price = 0
+            idx_key = INDICES[index_name]['index_key']
+            if index_name in self.engines and idx_key in self.engines[index_name].current_data:
+                current_price = self.engines[index_name].current_data[idx_key].get('ltp', 0)
 
-            await asyncio.sleep(300) # 5 minutes
+            threshold = 25 if index_name == 'NIFTY' else 100
+
+            if abs(current_price - last_update_price) >= threshold or last_update_price == 0:
+                details = await self.data_provider.get_instrument_details(index_name)
+                if details:
+                    self.instruments[index_name] = details
+                    last_update_price = details['ltp']
+                    print(f"Updated instruments for {index_name} (Price: {last_update_price}): {details}")
+
+            await asyncio.sleep(60) # Check every minute
 
     async def run(self):
         init_db()
