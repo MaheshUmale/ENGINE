@@ -4,6 +4,8 @@ from fastapi.responses import HTMLResponse
 import sqlite3
 import pandas as pd
 import os
+import json
+import plotly.graph_objects as go
 from .config import DB_PATH
 
 app = FastAPI(title="Symmetry Engine Dashboard")
@@ -27,13 +29,36 @@ async def home(request: Request):
         signals = pd.read_sql("SELECT * FROM signals ORDER BY timestamp DESC LIMIT 50", conn)
 
         # Fetch data for summary calculations (full history of closed trades)
-        all_closed_trades = pd.read_sql("SELECT pnl FROM trades WHERE side = 'SELL' AND status = 'CLOSED'", conn)
+        all_closed_trades = pd.read_sql("SELECT pnl, timestamp FROM trades WHERE side = 'SELL' AND status = 'CLOSED' ORDER BY timestamp", conn)
 
         # Calculate summary
         total_pnl = all_closed_trades['pnl'].sum() if not all_closed_trades.empty else 0
         trade_count = len(all_closed_trades)
         win_rate = (len(all_closed_trades[all_closed_trades['pnl'] > 0]) / trade_count * 100) if trade_count > 0 else 0
         avg_pnl = all_closed_trades['pnl'].mean() if not all_closed_trades.empty else 0
+
+        # Equity Curve
+        equity_json = None
+        max_drawdown = 0
+        sharpe_ratio = 0
+
+        if not all_closed_trades.empty:
+            all_closed_trades['cum_pnl'] = all_closed_trades['pnl'].cumsum()
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=all_closed_trades['timestamp'], y=all_closed_trades['cum_pnl'], mode='lines', name='Equity Curve'))
+            fig.update_layout(title="Equity Curve", xaxis_title="Time", yaxis_title="Net PnL", height=400, margin=dict(l=20, r=20, t=40, b=20))
+            equity_json = fig.to_json()
+
+            # Metrics
+            cum_pnl = all_closed_trades['cum_pnl']
+            max_pnl = cum_pnl.expanding().max()
+            drawdown = cum_pnl - max_pnl
+            max_drawdown = drawdown.min()
+
+            if len(all_closed_trades['pnl']) > 1:
+                std = all_closed_trades['pnl'].std()
+                sharpe_ratio = (avg_pnl / std) * (252**0.5) if std != 0 else 0
+
     except Exception as e:
         return f"Error reading database: {e}"
     finally:
@@ -46,7 +71,10 @@ async def home(request: Request):
         "total_pnl": total_pnl,
         "trade_count": trade_count,
         "win_rate": win_rate,
-        "avg_pnl": avg_pnl
+        "avg_pnl": avg_pnl,
+        "max_drawdown": max_drawdown,
+        "sharpe_ratio": sharpe_ratio,
+        "equity_chart": equity_json
     })
 
 def run_dashboard():
