@@ -35,4 +35,4 @@ INITIAL_BALANCE = 1000000
 SL_TRAILING = True
 
 # Enhancement: Multi-Index Sync
-ENABLE_INDEX_SYNC = False
+ENABLE_INDEX_SYNC = True
