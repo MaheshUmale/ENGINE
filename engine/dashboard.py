@@ -8,7 +8,7 @@ import json
 import plotly.graph_objects as go
 from .config import DB_PATH
 from .database import get_session, AppSetting, Notification
-
+import uvicorn
 app = FastAPI(title="Symmetry Engine Dashboard")
 # Templates are in the root templates directory
 templates = Jinja2Templates(directory="templates")
@@ -110,5 +110,5 @@ async def toggle_alerts(enabled: str = Form(...)):
     return RedirectResponse(url="/", status_code=303)
 
 def run_dashboard():
-    import uvicorn
+    
     uvicorn.run(app, host="0.0.0.0", port=8000)

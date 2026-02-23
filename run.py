@@ -2,7 +2,14 @@ import asyncio
 import argparse
 from engine.main import TradingBot
 from engine.backtester import Backtester
+from engine.dashboard import run_dashboard
+from engine.dashboard import run_dashboard
+import multiprocessing
 
+
+
+def start_dashboard():
+    run_dashboard()
 async def main():
     parser = argparse.ArgumentParser(description='Triple-Stream Symmetry & Unwinding Trading Engine')
     parser.add_argument('--mode', choices=['live', 'backtest', 'dashboard', 'full'], default='live', help='Run mode')
@@ -24,12 +31,7 @@ async def main():
     elif args.mode == 'full':
         # Run both live bot and dashboard
         print("Starting Full Mode: Bot + Dashboard")
-        from engine.dashboard import run_dashboard
-        import multiprocessing
-
-        def start_dashboard():
-            run_dashboard()
-
+        
         # Start dashboard in a separate process
         p = multiprocessing.Process(target=start_dashboard)
         p.start()
@@ -60,14 +62,10 @@ async def main():
 
 if __name__ == "__main__":
     import sys
-    # Special handling for dashboard mode to avoid nested asyncio loops
-    if "dashboard" in sys.argv:
-        from engine.database import init_db
-        init_db()
-        from engine.dashboard import run_dashboard
-        run_dashboard()
-    else:
-        try:
-            asyncio.run(main())
-        except KeyboardInterrupt:
-            pass
+     # Special handling for dashboard mode to avoid nested asyncio loops
+    
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
+
