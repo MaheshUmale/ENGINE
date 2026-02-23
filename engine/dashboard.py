@@ -1,12 +1,13 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Form
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 import sqlite3
 import pandas as pd
 import os
 import json
 import plotly.graph_objects as go
 from .config import DB_PATH
+from .database import get_session, AppSetting, Notification
 
 app = FastAPI(title="Symmetry Engine Dashboard")
 # Templates are in the root templates directory
@@ -64,10 +65,26 @@ async def home(request: Request):
     finally:
         conn.close()
 
+    # Fetch notifications and settings
+    notifications = []
+    alerts_enabled = True
+    session = get_session()
+    try:
+        notifs = session.query(Notification).order_by(Notification.timestamp.desc()).limit(20).all()
+        notifications = [{"message": n.message, "timestamp": n.timestamp} for n in notifs]
+
+        setting = session.query(AppSetting).filter_by(key='ENABLE_ALERTS').first()
+        if setting:
+            alerts_enabled = setting.value == 'True'
+    finally:
+        session.close()
+
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "trades": trades_display.to_dict(orient="records"),
         "signals": signals.to_dict(orient="records"),
+        "notifications": notifications,
+        "alerts_enabled": alerts_enabled,
         "total_pnl": total_pnl,
         "trade_count": trade_count,
         "win_rate": win_rate,
@@ -76,6 +93,21 @@ async def home(request: Request):
         "sharpe_ratio": sharpe_ratio,
         "equity_chart": equity_json
     })
+
+@app.post("/toggle-alerts")
+async def toggle_alerts(enabled: str = Form(...)):
+    session = get_session()
+    try:
+        setting = session.query(AppSetting).filter_by(key='ENABLE_ALERTS').first()
+        if not setting:
+            setting = AppSetting(key='ENABLE_ALERTS', value=enabled)
+            session.add(setting)
+        else:
+            setting.value = enabled
+        session.commit()
+    finally:
+        session.close()
+    return RedirectResponse(url="/", status_code=303)
 
 def run_dashboard():
     import uvicorn

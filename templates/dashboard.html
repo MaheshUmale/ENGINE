@@ -63,6 +63,19 @@
                 </div>
             </div>
         </div>
+        <div class="col-md-2">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h5 class="card-title">Alerts</h5>
+                    <form action="/toggle-alerts" method="post">
+                        <input type="hidden" name="enabled" value="{{ 'False' if alerts_enabled else 'True' }}">
+                        <button type="submit" class="btn {{ 'btn-success' if alerts_enabled else 'btn-secondary' }} btn-sm mt-1">
+                            {{ 'Enabled' if alerts_enabled else 'Disabled' }}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
     </div>
 
     {% if equity_chart %}
@@ -112,9 +125,20 @@
             </div>
         </div>
         <div class="col-md-5">
+            <div class="card mb-3">
+                <div class="card-header bg-warning text-dark">Live Alerts</div>
+                <div class="card-body scroll-pane" style="max-height: 300px; overflow-y: auto;">
+                    {% for notification in notifications %}
+                    <div class="border-bottom mb-2 pb-1">
+                        <small class="text-muted">{{ notification.timestamp }}</small><br>
+                        {{ notification.message | safe }}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
             <div class="card">
                 <div class="card-header bg-dark text-white">Recent Signals</div>
-                <div class="card-body">
+                <div class="card-body scroll-pane" style="max-height: 400px; overflow-y: auto;">
                     {% for signal in signals %}
                     <div class="alert mb-2 {% if signal.side == 'BUY_CE' %}alert-success signal-buy-ce{% else %}alert-danger signal-buy-pe{% endif %}">
                         <strong>{{ signal.side }}</strong> at {{ signal.timestamp }}<br>
