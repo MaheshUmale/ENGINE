@@ -1,5 +1,6 @@
 from .database import get_session, Trade
 from .config import INDICES
+from .utils import get_now_utc, ist_to_utc_naive
 import datetime
 
 class ExecutionEngine:
@@ -29,7 +30,8 @@ class ExecutionEngine:
         self.balance -= entry_cost
 
         session = get_session()
-        ts = timestamp if timestamp else (signal.timestamp if signal.timestamp else datetime.datetime.utcnow())
+        # Ensure timestamp is UTC naive for storage
+        ts = ist_to_utc_naive(timestamp) if timestamp else (signal.timestamp if signal.timestamp else get_now_utc())
         trade = Trade(
             timestamp=ts,
             index_name=signal.index_name,
@@ -77,7 +79,7 @@ class ExecutionEngine:
         self.balance += pnl_net
 
         exit_trade = Trade(
-            timestamp=timestamp if timestamp else datetime.datetime.utcnow(),
+            timestamp=ist_to_utc_naive(timestamp) if timestamp else get_now_utc(),
             index_name=index_name,
             instrument_key=pos['side'],
             side='SELL',

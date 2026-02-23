@@ -1,6 +1,7 @@
 import pandas as pd
 import datetime
 from .database import get_session, ReferenceLevel, Signal, RawTick
+from .utils import get_now_utc, ist_to_utc_naive
 from .config import SWING_WINDOW, CONFLUENCE_THRESHOLD
 
 class StrategyEngine:
@@ -394,7 +395,7 @@ class StrategyEngine:
     def save_reference_level(self, level_type, index_price, ce_price, pe_price, ce_key, pe_key, timestamp=None):
         session = get_session()
         ref = ReferenceLevel(
-            timestamp=timestamp if timestamp else datetime.datetime.utcnow(),
+            timestamp=ist_to_utc_naive(timestamp) if timestamp else get_now_utc(),
             index_name=self.index_name,
             type=level_type,
             index_price=index_price,
