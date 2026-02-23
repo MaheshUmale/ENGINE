@@ -9,35 +9,62 @@ class StrategyEngine:
         self.reference_levels = {'High': None, 'Low': None}
         self.positions = []
         self.current_data = {} # instrument_key -> latest_data (tick)
-        self.candle_history = {} # instrument_key -> list of last 5 candle closes
+        self.candle_history = {} # instrument_key -> list of last 20 candle dicts
+        self.candle_history_5m = {} # instrument_key -> list of last 10 5m candles
+        self.trailing_sl = {} # index_name -> current_sl_price
 
     def update_data(self, instrument_key, data):
         """Update current tick data."""
         self.current_data[instrument_key] = data
 
-    def update_candle(self, instrument_key, candle_close):
-        """Update historical candle close data for velocity and RS."""
-        if instrument_key not in self.candle_history:
-            self.candle_history[instrument_key] = []
+    def update_candle(self, instrument_key, candle, interval=1):
+        """Update historical candle data."""
+        target_history = self.candle_history if interval == 1 else self.candle_history_5m
+        limit = 20 if interval == 1 else 10
 
-        self.candle_history[instrument_key].append(candle_close)
-        if len(self.candle_history[instrument_key]) > 5:
-            self.candle_history[instrument_key].pop(0)
+        if instrument_key not in target_history:
+            target_history[instrument_key] = []
+
+        if isinstance(candle, float):
+            candle = {'open': candle, 'high': candle, 'low': candle, 'close': candle}
+
+        target_history[instrument_key].append(candle)
+        if len(target_history[instrument_key]) > limit:
+            target_history[instrument_key].pop(0)
+
+    def calculate_atr(self, instrument_key, period=14):
+        """Calculate Average True Range."""
+        history = self.candle_history.get(instrument_key, [])
+        if len(history) < period + 1:
+            return 0
+
+        tr_list = []
+        for i in range(1, len(history)):
+            h = history[i]['high']
+            l = history[i]['low']
+            pc = history[i-1]['close']
+            tr = max(h - l, abs(h - pc), abs(l - pc))
+            tr_list.append(tr)
+
+        return sum(tr_list[-period:]) / period
 
     def calculate_velocity(self, instrument_key):
         """Price Velocity: Rate of change over 3 candles."""
-        prices = self.candle_history.get(instrument_key, [])
-        if len(prices) < 4:
+        history = self.candle_history.get(instrument_key, [])
+        if len(history) < 4:
             return 0
-        return (prices[-1] - prices[-4]) / 3
+        return (history[-1]['close'] - history[-4]['close']) / 3
 
     def calculate_relative_strength(self, option_key, index_key):
         """Relative Strength: (Option % Change) / (Index % Change)."""
-        opt_prices = self.candle_history.get(option_key, [])
-        idx_prices = self.candle_history.get(index_key, [])
+        opt_history = self.candle_history.get(option_key, [])
+        idx_history = self.candle_history.get(index_key, [])
 
-        if len(opt_prices) < 2 or len(idx_prices) < 2:
+        if len(opt_history) < 2 or len(idx_history) < 2:
             return 0
+
+        opt_prices = [c['close'] for c in opt_history]
+        idx_prices = [c['close'] for c in idx_history]
 
         opt_change = (opt_prices[-1] - opt_prices[-2]) / opt_prices[-2] if opt_prices[-2] != 0 else 0
         idx_change = (idx_prices[-1] - idx_prices[-2]) / idx_prices[-2] if idx_prices[-2] != 0 else 0
@@ -157,8 +184,13 @@ class StrategyEngine:
                 details['volume_active'] = True
 
             if score >= CONFLUENCE_THRESHOLD:
+                # Check MTF Confirmation
+                if not self.check_mtf_confirmation('Bullish', idx_key):
+                    return None
+
                 # Check Guardrails
                 if not self.check_guardrails('Bullish', idx_data, ce_data, pe_data, ref_high):
+                    self.reset_trailing_sl()
                     details['ce_key'] = ce_key
                     details['pe_key'] = pe_key
                     return Signal(index_name=self.index_name, side='BUY_CE', index_price=idx_data['ltp'],
@@ -198,7 +230,12 @@ class StrategyEngine:
                 details['volume_active'] = True
 
             if score >= CONFLUENCE_THRESHOLD:
+                # Check MTF Confirmation
+                if not self.check_mtf_confirmation('Bearish', idx_key):
+                    return None
+
                 if not self.check_guardrails('Bearish', idx_data, ce_data, pe_data, ref_low):
+                    self.reset_trailing_sl()
                     details['ce_key'] = ce_key
                     details['pe_key'] = pe_key
                     return Signal(index_name=self.index_name, side='BUY_PE', index_price=idx_data['ltp'],
@@ -209,26 +246,48 @@ class StrategyEngine:
     def check_exit_condition(self, position, idx_data, ce_data, pe_data):
         """
         Exit when the Opposite Option stops making new lows and its OI starts falling.
+        Includes ATR-based dynamic trailing stop loss.
         """
-        if position.side == 'BUY_CE':
-            # Exit if PE OI starts falling (sellers finished)
-            if pe_data.get('oi_delta', 0) < 0:
-                 return True
-            # Exit if CE price drops 20% (Hard SL)
-            entry_price = getattr(position, 'entry_price', 0)
-            if ce_data['ltp'] < entry_price * 0.8:
+        from .config import SL_TRAILING
+        side = position.side
+        active_opt_data = ce_data if side == 'BUY_CE' else pe_data
+        opp_opt_data = pe_data if side == 'BUY_CE' else ce_data
+        entry_price = getattr(position, 'entry_price', 0)
+
+        # 1. ATR-based Trailing SL
+        if SL_TRAILING:
+            # Calculate ATR for the active option
+            opt_key = getattr(position, 'ce_key' if side == 'BUY_CE' else 'pe_key', None)
+            atr = self.calculate_atr(opt_key) if opt_key else 0
+            if atr > 0:
+                # Initialize or update trailing SL
+                if self.index_name not in self.trailing_sl:
+                    self.trailing_sl[self.index_name] = entry_price - (1.5 * atr)
+
+                # Update trailing SL (only moves up)
+                new_sl = active_opt_data['ltp'] - (1.5 * atr)
+                if new_sl > self.trailing_sl[self.index_name]:
+                    self.trailing_sl[self.index_name] = new_sl
+
+                # Check SL hit
+                if active_opt_data['ltp'] < self.trailing_sl[self.index_name]:
+                    return True
+
+        # 2. Strategy Exits
+        # Exit if Opposite Option OI starts falling (sellers finished)
+        if opp_opt_data.get('oi_delta', 0) < 0:
                 return True
-            # SL: Symmetry break
+
+        # 3. Hard Stop (20%) if ATR is not yet calculated
+        if active_opt_data['ltp'] < entry_price * 0.8:
+            return True
+
+        # 4. SL: Symmetry break
+        if side == 'BUY_CE':
             ref_high = self.reference_levels.get('High')
             if ref_high and idx_data['ltp'] > ref_high['index_price'] and ce_data['ltp'] < ref_high['ce_price']:
                 return True
-
-        elif position.side == 'BUY_PE':
-            if ce_data.get('oi_delta', 0) < 0:
-                return True
-            entry_price = getattr(position, 'entry_price', 0)
-            if pe_data['ltp'] < entry_price * 0.8:
-                return True
+        else:
             ref_low = self.reference_levels.get('Low')
             if ref_low and idx_data['ltp'] < ref_low['index_price'] and pe_data['ltp'] < ref_low['pe_price']:
                 return True
@@ -256,6 +315,64 @@ class StrategyEngine:
                 return True
 
         return False
+
+    def reset_trailing_sl(self):
+        self.trailing_sl[self.index_name] = 0
+
+    def check_mtf_confirmation(self, side, idx_key):
+        """Check if 5m trend confirms the 1m signal."""
+        history_5m = self.candle_history_5m.get(idx_key, [])
+        if not history_5m:
+            return True # Assume OK if no data
+
+        last_5m = history_5m[-1]
+        current_price = self.current_data[idx_key]['ltp']
+
+        if side == 'Bullish':
+            # Bullish: Current price > 5m Open AND 5m Close > previous 5m High (optional)
+            return current_price > last_5m['open']
+        elif side == 'Bearish':
+            # Bearish: Current price < 5m Open
+            return current_price < last_5m['open']
+
+        return True
+
+    def get_trend_state(self, side):
+        """
+        Returns True if the current index trend is in sync with the requested side.
+        Used for Multi-Index Sync enhancement.
+        """
+        # We need the index key from INDICES, but StrategyEngine doesn't have it directly.
+        # However, we can find it in self.current_data if we know the index_name.
+        # Actually, let's assume the index key is in current_data.
+        # A better way is to pass the index_key or find it.
+        from .config import INDICES
+        idx_key = INDICES[self.index_name]['index_key']
+
+        if idx_key not in self.current_data:
+            return True # Neutral if no data
+
+        ltp = self.current_data[idx_key]['ltp']
+
+        if side == 'BUY_CE':
+            ref = self.reference_levels.get('High')
+            if ref:
+                return ltp > ref['index_price']
+            hist = self.candle_history.get(idx_key)
+            if hist:
+                return ltp > hist[0]['open']
+            return True
+
+        elif side == 'BUY_PE':
+            ref = self.reference_levels.get('Low')
+            if ref:
+                return ltp < ref['index_price']
+            hist = self.candle_history.get(idx_key)
+            if hist:
+                return ltp < hist[0]['open']
+            return True
+
+        return True
 
     def save_reference_level(self, level_type, index_price, ce_price, pe_price, ce_key, pe_key, timestamp=None):
         session = get_session()

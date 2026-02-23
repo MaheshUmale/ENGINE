@@ -33,3 +33,6 @@ CONFLUENCE_THRESHOLD = 4  # All 4 conditions must be met
 # Paper Trading Config
 INITIAL_BALANCE = 1000000
 SL_TRAILING = True
+
+# Enhancement: Multi-Index Sync
+ENABLE_INDEX_SYNC = True

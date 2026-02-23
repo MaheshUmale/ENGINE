@@ -6,7 +6,7 @@ from .strategy import StrategyEngine
 from .execution import ExecutionEngine
 from .risk_manager import RiskManager
 from .alerts import AlertManager
-from .config import INDICES, ACCESS_TOKEN, SWING_WINDOW
+from .config import INDICES, ACCESS_TOKEN, SWING_WINDOW, ENABLE_INDEX_SYNC
 from .database import init_db, get_session, RawTick, Candle
 
 class TradingBot:
@@ -18,6 +18,7 @@ class TradingBot:
         self.alert_manager = AlertManager()
         self.instruments = {}
         self.candle_buffers = {} # instrument -> interval -> current_candle
+        self.candle_buffers_5m = {} # instrument -> current_candle
         self.tick_batch = []
         self.last_batch_save = datetime.datetime.now()
 
@@ -69,42 +70,61 @@ class TradingBot:
         buffer = self.candle_buffers[buffer_key]
         if minute > buffer['timestamp']:
             # Candle closed
-            engine.update_candle(key, buffer['close'])
+            engine.update_candle(key, buffer.copy())
 
             if key == instruments['index']:
                 candle_df = pd.DataFrame([buffer])
 
-                # Phase I: Identify Swing
-                # In real scenario, we'd fetch last N candles from DB
+                # Use a single session for all operations
                 session = get_session()
-                last_candles = session.query(Candle).filter_by(instrument_key=key).order_by(Candle.timestamp.desc()).limit(20).all()
-                session.close()
+                try:
+                    # Phase I: Identify Swing
+                    last_candles = session.query(Candle).filter_by(instrument_key=key).order_by(Candle.timestamp.desc()).limit(20).all()
 
-                if last_candles:
-                    df = pd.DataFrame([c.__dict__ for c in last_candles])
-                    df = pd.concat([df, candle_df], ignore_index=True)
-                    swing = engine.identify_swing(df)
-                    if swing:
-                        # Fetch current option prices for reference
-                        ce_data = engine.current_data.get(instruments['ce'], {})
-                        pe_data = engine.current_data.get(instruments['pe'], {})
-                        engine.save_reference_level(
-                            swing['type'],
-                            price,
-                            ce_data.get('ltp', 0),
-                            pe_data.get('ltp', 0),
-                            instruments['ce'],
-                            instruments['pe']
-                        )
+                    if last_candles:
+                        df = pd.DataFrame([c.__dict__ for c in last_candles])
+                        df = pd.concat([df, candle_df], ignore_index=True)
+                        swing = engine.identify_swing(df)
+                        if swing:
+                            # Fetch current option prices for reference
+                            ce_data = engine.current_data.get(instruments['ce'], {})
+                            pe_data = engine.current_data.get(instruments['pe'], {})
+                            engine.save_reference_level(
+                                swing['type'],
+                                price,
+                                ce_data.get('ltp', 0),
+                                pe_data.get('ltp', 0),
+                                instruments['ce'],
+                                instruments['pe']
+                            )
 
-                # Save Candle to DB
-                session = get_session()
-                db_candle = Candle(instrument_key=key, interval=1, timestamp=buffer['timestamp'],
-                                   open=buffer['open'], high=buffer['high'], low=buffer['low'],
-                                   close=buffer['close'], volume=buffer['volume'])
-                session.add(db_candle)
-                session.commit()
-                session.close()
+                    # Save Candle to DB
+                    db_candle = Candle(instrument_key=key, interval=1, timestamp=buffer['timestamp'],
+                                       open=buffer['open'], high=buffer['high'], low=buffer['low'],
+                                       close=buffer['close'], volume=buffer['volume'])
+                    session.add(db_candle)
+                    session.commit()
+                except Exception as e:
+                    print(f"Error in aggregate_and_process DB ops: {e}")
+                    session.rollback()
+                finally:
+                    session.close()
+
+            # 5-minute aggregation
+            if buffer_key not in self.candle_buffers_5m:
+                self.candle_buffers_5m[buffer_key] = buffer.copy()
+                self.candle_buffers_5m[buffer_key]['timestamp'] = minute.replace(minute=minute.minute - (minute.minute % 5))
+
+            buf5 = self.candle_buffers_5m[buffer_key]
+            if (minute.minute % 5 == 0) and minute > buf5['timestamp']:
+                # 5m candle closed
+                engine.update_candle(key, buf5.copy(), interval=5)
+                self.candle_buffers_5m[buffer_key] = buffer.copy()
+            else:
+                buf5['high'] = max(buf5['high'], buffer['high'])
+                buf5['low'] = min(buf5['low'], buffer['low'])
+                buf5['close'] = buffer['close']
+                buf5['volume'] += buffer['volume']
 
             # Reset buffer
             self.candle_buffers[buffer_key] = {'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
@@ -118,6 +138,18 @@ class TradingBot:
         # Run strategy signals on every tick if reference levels exist
         signal = engine.generate_signals(instruments)
         if signal:
+            # Enhancement: Multi-Index Sync Check
+            if ENABLE_INDEX_SYNC:
+                other_sync = True
+                for other_name, other_engine in self.engines.items():
+                    if other_name == index_name: continue
+                    if not other_engine.get_trend_state(signal.side):
+                        other_sync = False
+                        break
+                if not other_sync:
+                    # Optional: Log that sync failed
+                    return
+
             # Risk Management
             can_trade, reason = self.risk_manager.can_trade(len(self.execution.positions))
             if not can_trade:
@@ -140,10 +172,12 @@ class TradingBot:
             ce_data = engine.current_data.get(instruments['ce'], {})
             pe_data = engine.current_data.get(instruments['pe'], {})
 
-            if engine.check_exit_condition(pd.Series({'side': pos['side']}), idx_data, ce_data, pe_data):
+            from types import SimpleNamespace
+            if engine.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data):
                 exit_price = ce_data.get('ltp') if pos['side'] == 'BUY_CE' else pe_data.get('ltp')
                 trade = self.execution.close_position(index_name, exit_price, index_price=idx_data.get('ltp'))
                 if trade:
+                    engine.reset_trailing_sl()
                     self.risk_manager.update_pnl(trade.pnl)
                     asyncio.create_task(self.alert_manager.send_notification(
                         f"<b>TRADE CLOSED</b>\nIndex: {index_name}\nPnL: {trade.pnl:.2f}"
@@ -218,14 +252,37 @@ class TradingBot:
 
                 combined = combined.sort_values('timestamp').ffill().fillna(0)
 
+                # 5m aggregation for warmup
+                combined_5m = combined.resample('5min', on='timestamp').agg({
+                    'open_idx': 'first', 'high_idx': 'max', 'low_idx': 'min', 'close_idx': 'last',
+                    'close_ce': 'last', 'close_pe': 'last'
+                }).dropna()
+
+                for _, row in combined_5m.iterrows():
+                    engine.update_candle(details['index'], {
+                        'open': row['open_idx'], 'high': row['high_idx'],
+                        'low': row['low_idx'], 'close': row['close_idx']
+                    }, interval=5)
+
                 for i in range(SWING_WINDOW + 2, len(combined)):
                     subset = combined.iloc[:i]
                     current = combined.iloc[i]
 
                     # Update engine candle history
-                    engine.update_candle(details['index'], current['close_idx'])
-                    if 'close_ce' in current: engine.update_candle(details['ce'], current['close_ce'])
-                    if 'close_pe' in current: engine.update_candle(details['pe'], current['close_pe'])
+                    engine.update_candle(details['index'], {
+                        'open': current['open_idx'], 'high': current['high_idx'],
+                        'low': current['low_idx'], 'close': current['close_idx']
+                    })
+                    if 'close_ce' in current:
+                        engine.update_candle(details['ce'], {
+                            'open': current['open_ce'], 'high': current['high_ce'],
+                            'low': current['low_ce'], 'close': current['close_ce']
+                        })
+                    if 'close_pe' in current:
+                        engine.update_candle(details['pe'], {
+                            'open': current['open_pe'], 'high': current['high_pe'],
+                            'low': current['low_pe'], 'close': current['close_pe']
+                        })
 
                     # Identify Swings
                     swing_data = subset.rename(columns={'high_idx': 'high', 'low_idx': 'low', 'close_idx': 'close'})

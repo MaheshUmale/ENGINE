@@ -2,21 +2,39 @@ import pandas as pd
 import datetime
 from .data_provider import DataProvider
 from .strategy import StrategyEngine
-from .database import get_session, Trade
+from .database import get_session, Trade, Signal, ReferenceLevel, Candle, RawTick
 from .execution import ExecutionEngine
 from .risk_manager import RiskManager
-from .config import INDICES
+from .config import INDICES, ENABLE_INDEX_SYNC
 
 class Backtester:
     def __init__(self, index_name):
         self.index_name = index_name
         self.data_provider = DataProvider()
-        self.strategy = StrategyEngine(index_name)
+        self.engines = {name: StrategyEngine(name) for name in INDICES}
+        self.strategy = self.engines[index_name]
         self.execution = ExecutionEngine()
         self.risk_manager = RiskManager()
 
+    def clean_db(self):
+        print("Cleaning database for new backtest...")
+        session = get_session()
+        try:
+            session.query(Trade).delete()
+            session.query(Signal).delete()
+            session.query(ReferenceLevel).delete()
+            session.query(Candle).delete()
+            session.query(RawTick).delete()
+            session.commit()
+        except Exception as e:
+            print(f"Error cleaning DB: {e}")
+            session.rollback()
+        finally:
+            session.close()
+
     async def run_backtest(self, from_date, to_date):
-        print(f"Starting backtest for {self.index_name} from {from_date} to {to_date}")
+        self.clean_db()
+        print(f"Starting backtest for {self.index_name} from {from_date} to {to_date} (Index Sync: {ENABLE_INDEX_SYNC})")
 
         # Determine range of dates - include 1 day prior for warm-up
         start_dt = pd.to_datetime(from_date) - datetime.timedelta(days=2) # 2 days to ensure at least 1 trading day
@@ -62,6 +80,16 @@ class Backtester:
             print(f"Instruments for {date_str}: CE={details['ce']}, PE={details['pe']}, ATM={details['strike']}")
 
             idx_hist = self.data_provider.get_historical_data(details['index'], from_date=date_str, to_date=date_str)
+
+            # Fetch other index data if sync is enabled
+            other_indices_hist = {}
+            if ENABLE_INDEX_SYNC:
+                for name, cfg in INDICES.items():
+                    if name != self.index_name:
+                        oh = self.data_provider.get_historical_data(cfg['index_key'], from_date=date_str, to_date=date_str)
+                        if oh is not None:
+                            other_indices_hist[name] = oh
+
             # To support dynamic strike updates, we fetch the whole 7-strike chain
             chain_data = {}
             for opt in details['option_chain']:
@@ -79,6 +107,10 @@ class Backtester:
             # Align data
             combined = idx_hist.rename(columns={c: f"{c}_idx" for c in idx_hist.columns if c != 'timestamp'})
 
+            for name, oh in other_indices_hist.items():
+                oh = oh.rename(columns={c: f"{c}_{name}" for c in oh.columns if c != 'timestamp'})
+                combined = pd.merge(combined, oh, on='timestamp', how='outer')
+
             for k, df in chain_data.items():
                 df = df.rename(columns={c: f"{c}_{k}" for c in df.columns if c != 'timestamp'})
                 combined = pd.merge(combined, df, on='timestamp', how='outer')
@@ -93,6 +125,19 @@ class Backtester:
             # Use forward fill for prices and OI to handle missing candles, then fill remaining NaNs with 0
             combined = combined.dropna(subset=['close_idx'])
             combined = combined.sort_values('timestamp').ffill().fillna(0)
+
+            # Pre-calculate 5m candles for backtest
+            combined_5m = combined.resample('5min', on='timestamp').agg({
+                'open_idx': 'first', 'high_idx': 'max', 'low_idx': 'min', 'close_idx': 'last'
+            }).ffill()
+            combined_5m.index = combined_5m.index.tz_localize(None)
+
+            other_5m = {}
+            for name in other_indices_hist:
+                other_5m[name] = combined.resample('5min', on='timestamp').agg({
+                    f'open_{name}': 'first', f'high_{name}': 'max', f'low_{name}': 'min', f'close_{name}': 'last'
+                }).ffill()
+                other_5m[name].index = other_5m[name].index.tz_localize(None)
 
             for i in range(50, len(combined)):
                 subset = combined.iloc[:i]
@@ -109,11 +154,15 @@ class Backtester:
                 if hasattr(current_time, 'to_pydatetime'):
                     current_time = current_time.to_pydatetime().replace(tzinfo=None)
 
-                # Update strategy with all chain data for context, but primary ce/pe for signal
+                # Update main strategy engine
                 self.strategy.update_data(details['index'], {
                     'ltp': current['close_idx'],
                     'volume': current.get('volume_fut', 0)
                 })
+
+                # Update other engines for sync
+                for name in other_indices_hist:
+                    self.engines[name].update_data(INDICES[name]['index_key'], {'ltp': current[f'close_{name}']})
 
                 for opt in details['option_chain']:
                     for side in ['ce', 'pe']:
@@ -126,9 +175,37 @@ class Backtester:
                                 'oi': current[f'oi_{key}'],
                                 'oi_delta': current[f'oi_{key}'] - prev_oi
                             })
-                            self.strategy.update_candle(key, current[f'close_{key}'])
+                            self.strategy.update_candle(key, {
+                                'open': current[f'open_{key}'], 'high': current[f'high_{key}'],
+                                'low': current[f'low_{key}'], 'close': current[f'close_{key}']
+                            })
 
-                self.strategy.update_candle(details['index'], current['close_idx'])
+                self.strategy.update_candle(details['index'], {
+                    'open': current['open_idx'], 'high': current['high_idx'],
+                    'low': current['low_idx'], 'close': current['close_idx']
+                })
+
+                for name in other_indices_hist:
+                    self.engines[name].update_candle(INDICES[name]['index_key'], {
+                        'open': current[f'open_{name}'], 'high': current[f'high_{name}'],
+                        'low': current[f'low_{name}'], 'close': current[f'close_{name}']
+                    })
+
+                # Update 5m candle if at 5m boundary
+                if current_time.minute % 5 == 0:
+                    ts = current_time.replace(second=0, microsecond=0)
+                    c5 = combined_5m.loc[ts]
+                    self.strategy.update_candle(details['index'], {
+                        'open': c5['open_idx'], 'high': c5['high_idx'],
+                        'low': c5['low_idx'], 'close': c5['close_idx']
+                    }, interval=5)
+
+                    for name in other_indices_hist:
+                        c5o = other_5m[name].loc[ts]
+                        self.engines[name].update_candle(INDICES[name]['index_key'], {
+                            'open': c5o[f'open_{name}'], 'high': c5o[f'high_{name}'],
+                            'low': c5o[f'low_{name}'], 'close': c5o[f'close_{name}']
+                        }, interval=5)
 
                 # Identify Swings
                 swing_data = subset.rename(columns={'high_idx': 'high', 'low_idx': 'low', 'close_idx': 'close'})
@@ -148,6 +225,17 @@ class Backtester:
                 if not is_warmup:
                     signal = self.strategy.generate_signals(details)
                     if signal:
+                        # Enhancement: Multi-Index Sync Check
+                        if ENABLE_INDEX_SYNC:
+                            other_sync = True
+                            for other_name, other_engine in self.engines.items():
+                                if other_name == self.index_name: continue
+                                if not other_engine.get_trend_state(signal.side):
+                                    other_sync = False
+                                    break
+                            if not other_sync:
+                                continue
+
                         signal.timestamp = current_time
                         if self.index_name not in self.execution.positions:
                             # Risk Check
@@ -181,6 +269,7 @@ class Backtester:
                         exit_price = ce_data['ltp'] if pos['side'] == 'BUY_CE' else pe_data['ltp']
                         trade = self.execution.close_position(self.index_name, exit_price, timestamp=current_time, index_price=current['close_idx'])
                         if trade:
+                            self.strategy.reset_trailing_sl()
                             self.risk_manager.update_pnl(trade.pnl)
 
             if not is_warmup:
@@ -211,6 +300,12 @@ class Backtester:
             drawdown = cumulative - max_pnl
             max_dd = drawdown.min()
 
+            # Sharpe Ratio (Daily proxy)
+            sharpe = 0
+            if len(pnls) > 1:
+                std = pd.Series(pnls).std()
+                sharpe = (avg_trade / std) * (252**0.5) if std != 0 else 0
+
             print("\n" + "="*30)
             print(f"PERFORMANCE REPORT: {self.index_name}")
             print("="*30)
@@ -219,6 +314,7 @@ class Backtester:
             print(f"Total PnL (Net): {total_pnl:.2f}")
             print(f"Avg per Trade:   {avg_trade:.2f}")
             print(f"Max Drawdown:    {max_dd:.2f}")
+            print(f"Sharpe Ratio:    {sharpe:.2f}")
             print("="*30 + "\n")
 
         return final_df

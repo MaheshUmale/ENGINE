@@ -50,20 +50,30 @@
         <div class="col-md-2">
             <div class="card text-center">
                 <div class="card-body">
-                    <h5 class="card-title">Avg PnL</h5>
-                    <p class="card-text h2">{{ "%.2f"|format(avg_pnl) }}</p>
+                    <h5 class="card-title">Max DD</h5>
+                    <p class="card-text h2 negative">{{ "%.0f"|format(max_drawdown) }}</p>
                 </div>
             </div>
         </div>
         <div class="col-md-2">
             <div class="card text-center">
                 <div class="card-body">
-                    <h5 class="card-title">Status</h5>
-                    <p class="card-text h2 text-success">Active</p>
+                    <h5 class="card-title">Sharpe</h5>
+                    <p class="card-text h2">{{ "%.2f"|format(sharpe_ratio) }}</p>
                 </div>
             </div>
         </div>
     </div>
+
+    {% if equity_chart %}
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body" id="equity-chart"></div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     {% if error %}
     <div class="alert alert-warning mt-4">{{ error }}</div>
@@ -118,5 +128,12 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+{% if equity_chart %}
+<script>
+    var chartData = {{ equity_chart | safe }};
+    Plotly.newPlot('equity-chart', chartData.data, chartData.layout);
+</script>
+{% endif %}
 </body>
 </html>

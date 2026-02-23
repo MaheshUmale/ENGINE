@@ -62,7 +62,16 @@ The strategy uses two primary "Unwinding" exit triggers:
 *   **Transaction Costs**: Turnover-based commission (0.05%) + fixed GST/STT proxy charges (₹20 per side).
 *   **Lot Sizing**: NIFTY (75), BANKNIFTY (15).
 
-## 10. Strategy Warmup
+## 10. Multi-Index Symmetry Sync (Optional)
+Advanced traders often require "Market Confluence" where both major indices (NIFTY & BANKNIFTY) are moving in the same direction before committing to a trade.
+
+*   **Logic**: If enabled via `ENABLE_INDEX_SYNC`, a signal generated in NIFTY will only be executed if BANKNIFTY is also in a "Bullish" state (for CE trades) or "Bearish" state (for PE trades).
+*   **Sync Definition**:
+    *   **Bullish**: Index is above its High Reference Level or its day's open.
+    *   **Bearish**: Index is below its Low Reference Level or its day's open.
+*   **Significance**: Reduces "fake-outs" that occur when indices diverge (e.g., NIFTY rising while BANKNIFTY is dragging down).
+
+## 11. Strategy Warmup
 To ensure the engine has immediate access to structural levels upon startup:
 *   **Historical Ingestion**: The bot fetches and processes the last 2 days of historical data for the Index and relevant ATM options.
 *   **State Initialization**: Reference levels (Highs/Lows) and candle history (for Velocity/RS) are pre-calculated before the live stream starts.

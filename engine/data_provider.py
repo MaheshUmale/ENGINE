@@ -166,13 +166,20 @@ class DataProvider:
             # Find the closest expiry to the reference date
             if reference_date:
                 ref_dt = pd.to_datetime(reference_date)
-                future_expiries = [e for e in opt_df['expiry_dt'].unique() if e >= ref_dt]
-                if future_expiries:
-                    nearest_expiry = min(future_expiries)
-                else:
-                    nearest_expiry = opt_df['expiry_dt'].min() # Fallback
             else:
-                nearest_expiry = opt_df['expiry_dt'].min()
+                ref_dt = datetime.datetime.now()
+
+            future_expiries = sorted([e for e in opt_df['expiry_dt'].unique() if e.date() >= ref_dt.date()])
+
+            if future_expiries:
+                nearest_expiry = future_expiries[0]
+                # Auto-Rollover: If expiry is today and it's past 1:30 PM, move to next week
+                if nearest_expiry.date() == ref_dt.date() and ref_dt.hour >= 13 and ref_dt.minute >= 30:
+                    if len(future_expiries) > 1:
+                        nearest_expiry = future_expiries[1]
+                        print(f"Expiry Day Rollover: Moving from {future_expiries[0].date()} to {nearest_expiry.date()}")
+            else:
+                nearest_expiry = opt_df['expiry_dt'].min() # Fallback
 
             near_opt_df = opt_df[opt_df['expiry_dt'] == nearest_expiry]
 
