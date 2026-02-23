@@ -2,9 +2,11 @@ import asyncio
 import argparse
 from engine.main import TradingBot
 from engine.backtester import Backtester
-from engine.dashboard import run_dashboard
-from engine.dashboard import run_dashboard
 import multiprocessing
+
+def start_dashboard():
+    from engine.dashboard import run_dashboard
+    run_dashboard()
 
 
 
@@ -31,7 +33,7 @@ async def main():
     elif args.mode == 'full':
         # Run both live bot and dashboard
         print("Starting Full Mode: Bot + Dashboard")
-        
+
         # Start dashboard in a separate process
         p = multiprocessing.Process(target=start_dashboard)
         p.start()

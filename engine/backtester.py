@@ -6,6 +6,7 @@ from .database import get_session, Trade, Signal, ReferenceLevel, Candle, RawTic
 from .execution import ExecutionEngine
 from .risk_manager import RiskManager
 from .config import INDICES, ENABLE_INDEX_SYNC
+from .utils import ist_to_utc_naive
 
 class Backtester:
     def __init__(self, index_name):
@@ -130,14 +131,12 @@ class Backtester:
             combined_5m = combined.resample('5min', on='timestamp').agg({
                 'open_idx': 'first', 'high_idx': 'max', 'low_idx': 'min', 'close_idx': 'last'
             }).ffill()
-            combined_5m.index = combined_5m.index.tz_localize(None)
 
             other_5m = {}
             for name in other_indices_hist:
                 other_5m[name] = combined.resample('5min', on='timestamp').agg({
                     f'open_{name}': 'first', f'high_{name}': 'max', f'low_{name}': 'min', f'close_{name}': 'last'
                 }).ffill()
-                other_5m[name].index = other_5m[name].index.tz_localize(None)
 
             for i in range(50, len(combined)):
                 subset = combined.iloc[:i]
@@ -152,7 +151,7 @@ class Backtester:
                 details['strike'] = best_strike['strike']
 
                 if hasattr(current_time, 'to_pydatetime'):
-                    current_time = current_time.to_pydatetime().replace(tzinfo=None)
+                    current_time = current_time.to_pydatetime()
 
                 # Update main strategy engine
                 self.strategy.update_data(details['index'], {
@@ -236,7 +235,7 @@ class Backtester:
                             if not other_sync:
                                 continue
 
-                        signal.timestamp = current_time
+                        signal.timestamp = ist_to_utc_naive(current_time)
                         if self.index_name not in self.execution.positions:
                             # Risk Check
                             can_trade, _ = self.risk_manager.can_trade(len(self.execution.positions), timestamp=current_time)
