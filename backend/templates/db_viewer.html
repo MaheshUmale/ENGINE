@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRODESK | DB Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,800&display=swap');
+
+        :root {
+            --bg-main: #0f172a;
+            --bg-panel: rgba(30, 41, 59, 0.7);
+            --text-primary: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-subtle: rgba(255, 255, 255, 0.05);
+            --color-primary: #3b82f6;
+            --input-bg: #1e293b;
+        }
+
+        body.light-theme {
+            --bg-main: #f1f5f9;
+            --bg-panel: rgba(255, 255, 255, 0.8);
+            --text-primary: #0f172a;
+            --text-muted: #475569;
+            --border-subtle: rgba(0, 0, 0, 0.1);
+            --input-bg: #ffffff;
+        }
+
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-main); color: var(--text-primary); transition: background-color 0.3s, color 0.3s; letter-spacing: -0.01em; }
+        .glass-panel { background: var(--bg-panel); backdrop-filter: blur(12px); border: 1px solid var(--border-subtle); }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
+    </style>
+</head>
+<body class="h-full flex flex-col overflow-hidden">
+    <header class="h-14 py-2 glass-panel border-b border-white/5 px-4 md:px-6 flex items-center shrink-0">
+        <div class="flex items-center justify-between w-full">
+            <div class="flex items-center gap-4">
+                <a href="/" class="text-sm font-black text-white italic tracking-tighter uppercase shrink-0">PRO<span class="text-blue-500">DESK</span> <span class="text-[10px] ml-2 text-slate-500 not-italic font-black uppercase tracking-widest">DB EXPLORER</span></a>
+                <nav class="hidden md:flex items-center gap-3 ml-4">
+                    <a href="/options" class="text-[10px] font-black text-slate-500 hover:text-blue-500 transition-colors uppercase tracking-widest">OPTIONS</a>
+                </nav>
+            </div>
+            <button id="dbThemeToggle" class="p-2 hover:bg-white/5 rounded-full text-gray-400 transition-colors">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <div class="flex-1 flex overflow-hidden">
+        <!-- Sidebar -->
+        <aside class="w-64 border-r border-white/5 flex flex-col glass-panel overflow-hidden shrink-0">
+            <div class="p-4 border-b border-white/5 flex justify-between items-center bg-black/10">
+                <h2 class="text-[10px] font-black uppercase tracking-widest text-slate-400">TABLES</h2>
+                <button onclick="fetchTables()" class="text-slate-500 hover:text-white transition-colors">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                </button>
+            </div>
+            <div id="tableList" class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
+                <div class="p-2 text-xs text-gray-500 animate-pulse">Loading tables...</div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 flex flex-col overflow-hidden p-4 space-y-4">
+            <!-- Query Editor -->
+            <div class="glass-panel rounded-xl p-4 flex flex-col gap-3">
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center gap-4">
+                        <h3 class="text-xs font-bold uppercase text-gray-400">SQL Editor</h3>
+                        <div class="flex gap-2">
+                            <button onclick="setQuery('SELECT * FROM ticks ORDER BY ts_ms DESC LIMIT 100')" class="text-[9px] bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded text-gray-400 border border-white/5">Latest Ticks</button>
+                            <button onclick="setQuery('SELECT * FROM options_snapshots ORDER BY timestamp DESC LIMIT 100')" class="text-[9px] bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded text-gray-400 border border-white/5">Latest Options</button>
+                            <button onclick="setQuery('SELECT * FROM pcr_history ORDER BY timestamp DESC LIMIT 100')" class="text-[9px] bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded text-gray-400 border border-white/5">PCR Hist</button>
+                        </div>
+                    </div>
+                    <button id="runBtn" class="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black px-8 py-2.5 rounded-full transition-all uppercase tracking-tighter shadow-lg shadow-blue-500/20 active:scale-95">RUN QUERY</button>
+                </div>
+                <textarea id="sqlInput" class="bg-black/50 border border-white/10 rounded-xl p-4 text-sm font-mono text-blue-400 outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all h-32 resize-none custom-scrollbar shadow-inner" placeholder="SELECT * FROM ticks LIMIT 100"></textarea>
+            </div>
+
+            <!-- Results -->
+            <div class="flex-1 glass-panel rounded-xl overflow-hidden flex flex-col">
+                <div class="p-3 border-b border-white/5 flex justify-between items-center bg-white/5">
+                    <div class="flex items-center gap-3">
+                        <h3 class="text-xs font-bold uppercase text-gray-400">Results</h3>
+                        <span id="rowCount" class="text-[10px] font-mono text-blue-500 font-bold bg-blue-500/10 px-2 py-0.5 rounded">0 rows</span>
+                    </div>
+                    <button id="exportBtn" class="text-[10px] font-bold text-gray-400 hover:text-white flex items-center gap-1 transition-colors uppercase italic tracking-tighter">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                        Export CSV
+                    </button>
+                </div>
+                <div id="resultsContainer" class="flex-1 overflow-auto custom-scrollbar">
+                    <table id="resultsTable" class="w-full text-left text-[11px] border-collapse">
+                        <thead id="tableHead" class="sticky top-0 bg-gray-900 z-10">
+                            <!-- Headers injected here -->
+                        </thead>
+                        <tbody id="tableBody" class="divide-y divide-white/5">
+                            <!-- Data injected here -->
+                            <tr>
+                                <td colspan="100" class="p-8 text-center text-gray-600 italic">No data to display. Run a query to see results.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const tableList = document.getElementById('tableList');
+        const sqlInput = document.getElementById('sqlInput');
+        const runBtn = document.getElementById('runBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const tableHead = document.getElementById('tableHead');
+        const tableBody = document.getElementById('tableBody');
+        const rowCount = document.getElementById('rowCount');
+
+        function setQuery(sql) {
+            sqlInput.value = sql;
+            runQuery();
+        }
+
+        async function fetchTables() {
+            try {
+                const res = await fetch('/api/db/tables');
+                const data = await res.json();
+
+                tableList.innerHTML = '';
+                data.tables.forEach(table => {
+                    const btn = document.createElement('div');
+                    btn.className = 'group p-2 rounded-lg hover:bg-white/5 cursor-pointer transition-all';
+                    btn.innerHTML = `
+                        <div class="flex justify-between items-center mb-0.5">
+                            <div class="text-xs font-bold text-gray-300 group-hover:text-blue-400">${table.name}</div>
+                            <div class="text-[9px] font-mono text-gray-600">${table.row_count.toLocaleString()}</div>
+                        </div>
+                        <div class="text-[9px] text-gray-600 truncate">${table.schema.map(c => c.column_name).join(', ')}</div>
+                    `;
+                    btn.onclick = () => {
+                        sqlInput.value = `SELECT * FROM "${table.name}" LIMIT 100`;
+                        runQuery();
+                    };
+                    tableList.appendChild(btn);
+                });
+            } catch (err) {
+                tableList.innerHTML = `<div class="p-2 text-xs text-red-500">Error: ${err.message}</div>`;
+            }
+        }
+
+        async function runQuery() {
+            const sql = sqlInput.value.trim();
+            if (!sql) return;
+
+            runBtn.disabled = true;
+            runBtn.innerText = 'Running...';
+            tableBody.innerHTML = '<tr><td colspan="100" class="p-8 text-center animate-pulse text-blue-500 italic">Executing query...</td></tr>';
+            tableHead.innerHTML = '';
+            rowCount.innerText = '0 rows';
+
+            try {
+                const res = await fetch('/api/db/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sql })
+                });
+                const data = await res.json();
+
+            if (data.detail) {
+                tableBody.innerHTML = `<tr><td colspan="100" class="p-8 text-red-500 font-mono text-xs whitespace-pre-wrap">${data.detail}</td></tr>`;
+                return;
+            }
+                if (data.error) {
+                    tableBody.innerHTML = `<tr><td colspan="100" class="p-8 text-red-500 font-mono text-xs whitespace-pre-wrap">${data.error}</td></tr>`;
+                    return;
+                }
+
+                const results = data.results;
+                if (!results || results.length === 0) {
+                    tableBody.innerHTML = '<tr><td colspan="100" class="p-8 text-center text-gray-600 italic">Query executed successfully, but returned no rows.</td></tr>';
+                    return;
+                }
+
+                rowCount.innerText = `${results.length} rows`;
+
+                // Build Headers
+                const cols = Object.keys(results[0]);
+                const trHead = document.createElement('tr');
+                cols.forEach(col => {
+                    const th = document.createElement('th');
+                    th.className = 'p-3 border-b border-white/10 font-black text-gray-200 uppercase tracking-tighter';
+                    th.innerText = col;
+                    trHead.appendChild(th);
+                });
+                tableHead.appendChild(trHead);
+
+                // Build Body
+                tableBody.innerHTML = '';
+                results.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-white/5 transition-colors';
+                    cols.forEach(col => {
+                        const td = document.createElement('td');
+                        td.className = 'p-3 text-gray-400 font-mono border-b border-white/5 truncate max-w-xs';
+                        let val = row[col];
+                        if (typeof val === 'object' && val !== null) val = JSON.stringify(val);
+                        td.innerText = val;
+                        td.title = val;
+                        tr.appendChild(td);
+                    });
+                    tableBody.appendChild(tr);
+                });
+
+            } catch (err) {
+                tableBody.innerHTML = `<tr><td colspan="100" class="p-8 text-red-500 font-mono text-xs text-center">Fetch Error: ${err.message}</td></tr>`;
+            } finally {
+                runBtn.disabled = false;
+                runBtn.innerText = 'Run Query';
+            }
+        }
+
+        async function exportCSV() {
+            const sql = sqlInput.value.trim();
+            if (!sql) return;
+
+            exportBtn.disabled = true;
+            const originalText = exportBtn.innerHTML;
+            exportBtn.innerText = 'Exporting...';
+
+            try {
+                const res = await fetch('/api/db/export', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sql })
+                });
+
+                if (res.ok) {
+                    const blob = await res.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `query_export_${new Date().getTime()}.csv`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                } else {
+                    const data = await res.json();
+                    alert(`Export failed: ${data.detail || data.error || 'Unknown error'}`);
+                }
+            } catch (err) {
+                alert(`Export Error: ${err.message}`);
+            } finally {
+                exportBtn.disabled = false;
+                exportBtn.innerHTML = originalText;
+            }
+        }
+
+        runBtn.onclick = runQuery;
+        exportBtn.onclick = exportCSV;
+        sqlInput.onkeydown = (e) => {
+            if (e.ctrlKey && e.key === 'Enter') runQuery();
+        };
+
+        // Theme Management
+        const themeToggle = document.getElementById('dbThemeToggle');
+        function applyTheme(theme) {
+            if (theme === 'light') {
+                document.body.classList.add('light-theme');
+            } else {
+                document.body.classList.remove('light-theme');
+            }
+            localStorage.setItem('theme', theme);
+        }
+
+        themeToggle.onclick = () => {
+            const isLight = document.body.classList.contains('light-theme');
+            applyTheme(isLight ? 'dark' : 'light');
+        };
+
+        // Init
+        applyTheme(localStorage.getItem('theme') || 'dark');
+        fetchTables();
+    </script>
+</body>
+</html>

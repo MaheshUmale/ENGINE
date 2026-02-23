@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRODESK | Enhanced Options Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,800&display=swap');
+
+        :root {
+            --bg-main: #0f172a;
+            --bg-panel: rgba(30, 41, 59, 0.7);
+            --text-primary: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-subtle: rgba(255, 255, 255, 0.05);
+            --color-primary: #3b82f6;
+            --input-bg: #1e293b;
+            --tab-inactive: #64748b;
+            --btn-bg-muted: #334155;
+            --btn-text: #ffffff;
+        }
+
+        body.light-theme {
+            --bg-main: #f1f5f9;
+            --bg-panel: rgba(255, 255, 255, 0.9);
+            --text-primary: #0f172a;
+            --text-muted: #475569;
+            --border-subtle: rgba(0, 0, 0, 0.1);
+            --input-bg: #ffffff;
+            --btn-bg-muted: #e2e8f0;
+            --btn-text: #0f172a;
+        }
+
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-main); color: var(--text-primary); transition: background-color 0.3s, color 0.3s; -webkit-font-smoothing: antialiased; letter-spacing: -0.01em; }
+        .glass-panel { background: var(--bg-panel); backdrop-filter: blur(16px); border: 1px solid var(--border-subtle); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+        .flash-up { animation: flash-green 0.8s ease-out; }
+        .flash-down { animation: flash-red 0.8s ease-out; }
+        @keyframes flash-green { 0% { background-color: rgba(34, 197, 94, 0.3); } 100% { background-color: transparent; } }
+        @keyframes flash-red { 0% { background-color: rgba(239, 68, 68, 0.3); } 100% { background-color: transparent; } }
+
+        .sticky-header th { position: sticky; top: 0; z-index: 10; background: var(--input-bg); border-bottom: 2px solid var(--border-subtle); color: var(--text-primary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+        .tab-btn { color: var(--text-muted); transition: all 0.2s ease; border-bottom: 3px solid transparent; }
+        .tab-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
+        .tab-active { border-bottom: 3px solid #3b82f6 !important; color: #3b82f6 !important; font-weight: 800; }
+        .greek-positive { color: #22c55e; font-weight: 700; }
+        .greek-negative { color: #ef4444; font-weight: 700; }
+        .strike-cell { background-color: var(--input-bg); font-weight: 900 !important; color: #f59e0b !important; }
+        .light-theme .strike-cell { background-color: #f8fafc; color: #d97706 !important; }
+
+        /* Component Overrides for Themes */
+        .theme-text-muted { color: var(--text-muted); }
+        .theme-input { background-color: var(--input-bg); border: 1px solid var(--border-subtle); color: var(--text-primary); }
+        .light-theme .text-white { color: var(--text-primary) !important; }
+        .light-theme .text-gray-400 { color: var(--text-muted) !important; }
+        .light-theme .text-gray-500 { color: #64748b !important; }
+        .light-theme .bg-slate-900,
+        .light-theme .bg-gray-900 { background-color: var(--btn-bg-muted) !important; color: var(--text-primary) !important; }
+        .light-theme .bg-slate-800 { background-color: #f1f5f9 !important; color: #0f172a !important; }
+        .light-theme .bg-black\/40 { background-color: rgba(255, 255, 255, 0.5) !important; }
+        .light-theme .bg-black\/30 { background-color: rgba(0, 0, 0, 0.05) !important; }
+    </style>
+</head>
+<body class="h-full flex flex-col overflow-hidden custom-scrollbar">
+    <!-- Header -->
+    <header class="h-14 py-2 glass-panel border-b border-white/5 px-4 md:px-6 flex items-center justify-between shrink-0" role="banner">
+        <div class="flex items-center gap-6">
+            <div class="flex flex-col">
+                <a href="/" class="text-sm font-black text-white italic tracking-tighter uppercase shrink-0" aria-label="ProDesk Home">
+                    PRO<span class="text-blue-500">DESK</span> <span class="text-xs not-italic font-bold text-gray-500 ml-1">OPTIONS</span>
+                </a>
+            </div>
+            <div class="flex items-center gap-4 text-[10px] text-gray-400">
+                <span aria-live="polite">Source: <span id="dataSource" class="text-green-400 font-bold">-</span></span>
+                <span aria-live="polite">Updated: <span id="lastUpdated" class="text-blue-400 font-bold">-</span></span>
+                <label for="underlyingSelect" class="sr-only">Select Underlying Asset</label>
+                <select id="underlyingSelect" class="bg-gray-900 border border-white/10 rounded px-3 py-1 text-xs font-black text-blue-500 outline-none focus:ring-2 focus:ring-blue-500/50 transition-all cursor-pointer hover:bg-black">
+                    <option value="NSE:NIFTY">NIFTY 50</option>
+                    <option value="NSE:BANKNIFTY">BANKNIFTY</option>
+                    <option value="NSE:CNXFINANCE">CNXFINANCE</option>
+                </select>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1 bg-black/30 p-1 rounded-full border border-white/10 shadow-inner">
+                <button id="refreshBtn" class="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black px-6 py-2 rounded-full transition-all uppercase tracking-tighter shadow-lg shadow-blue-500/20 active:scale-95">
+                    REFRESH
+                </button>
+                <button id="backfillBtn" class="bg-slate-700 hover:bg-slate-600 text-white text-[10px] font-black px-6 py-2 rounded-full transition-all uppercase tracking-tighter ml-1 active:scale-95" style="background: var(--btn-bg-muted); color: var(--btn-text);">
+                    BACKFILL
+                </button>
+                <button id="strategyBtn" class="text-gray-400 hover:text-white p-1.5 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                </button>
+            </div>
+            <button id="optionsThemeToggle" class="p-2 hover:bg-white/5 rounded-full text-gray-400 transition-colors ml-2" title="Toggle Theme">
+                <svg id="optionsSunIcon" class="hidden w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd"/></svg>
+                <svg id="optionsMoonIcon" class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 overflow-hidden p-3 flex flex-col gap-3">
+        <!-- Genie Insights Card (Only one kept as requested) -->
+        <div class="glass-panel rounded-xl p-3 border-l-4 border-blue-500 flex items-center justify-between shadow-sm shrink-0">
+            <div class="flex-1">
+                <div class="text-[10px] text-blue-500 font-black uppercase tracking-widest flex items-center gap-3">
+                    OiGenie Market Control
+                    <span id="sidewaysBadge" class="hidden text-[8px] bg-yellow-500/20 text-yellow-500 px-2 py-0.5 rounded">SIDEWAYS EXPECTED</span>
+                </div>
+                <div class="flex items-center gap-6 mt-1">
+                    <div id="genieControl" class="text-lg font-black text-white uppercase tracking-tight">-</div>
+                    <div class="h-4 w-px bg-white/10"></div>
+                    <div id="genieDistribution" class="text-[10px] font-bold text-gray-500 uppercase">-</div>
+                </div>
+            </div>
+            <!-- PCR Trend Sparkline -->
+            <div class="flex-1 max-w-[180px] h-10 px-4 border-l border-white/5 hidden lg:block">
+                <div class="flex justify-between items-center mb-0.5">
+                    <span class="text-[8px] text-gray-500 font-black uppercase">PCR Trend</span>
+                    <span id="currentPcrValue" class="text-[10px] font-black text-blue-500">-</span>
+                </div>
+                <div class="h-6">
+                    <canvas id="pcrTrendChart"></canvas>
+                </div>
+            </div>
+            <div class="flex items-center gap-8">
+                <div class="text-right">
+                    <div class="text-[9px] text-gray-500 font-black uppercase">Spot Price</div>
+                    <div id="spotPrice" class="text-lg text-white font-black tracking-tighter">0.00</div>
+                </div>
+                <div class="text-right">
+                    <div class="text-[9px] text-gray-500 font-black uppercase">Institutional Range</div>
+                    <div id="genieRange" class="text-sm text-blue-500 font-black tracking-tighter">-</div>
+                </div>
+                <div class="text-right">
+                    <div class="text-[9px] text-gray-500 font-black uppercase">Max Pain</div>
+                    <div id="maxPain" class="text-sm text-purple-500 font-black tracking-tighter">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Compact 2x2 Grid Section -->
+        <div class="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-2 gap-3">
+            <!-- 1. Change in CE Vs Change in PE vs Spot -->
+            <div class="glass-panel rounded-xl p-3 shadow-sm flex flex-col min-h-0">
+                <h3 class="text-[10px] font-black uppercase tracking-wider mb-2 flex justify-between items-center text-gray-400 shrink-0">
+                    CE vs PE OI Change Flow
+                    <span class="text-[9px] font-normal opacity-60">X: Time | Y: OI Chg</span>
+                </h3>
+                <div class="flex-1 min-h-0 relative">
+                    <canvas id="ceVsPeChangeChart"></canvas>
+                </div>
+            </div>
+
+            <!-- 2. Difference in Put Call OI change Vs Spot -->
+            <div class="glass-panel rounded-xl p-3 shadow-sm flex flex-col min-h-0">
+                <h3 class="text-[10px] font-black uppercase tracking-wider mb-2 flex justify-between items-center text-gray-400 shrink-0">
+                    OI Change Multi-Trend
+                    <span class="text-[9px] font-normal opacity-60">X: Time | Y: PE-CE Diff</span>
+                </h3>
+                <div class="flex-1 min-h-0 relative">
+                    <canvas id="oiDiffChart"></canvas>
+                </div>
+            </div>
+
+            <!-- 3. Change in OI Per Strike (Compact Card) -->
+            <div class="glass-panel rounded-xl p-3 shadow-sm flex flex-col min-h-0">
+                <div class="flex justify-between items-start mb-1 shrink-0">
+                    <h3 class="text-[10px] font-black uppercase tracking-wider text-gray-400">Strike-wise OI Change</h3>
+                    <div class="flex gap-4">
+                        <div class="text-right">
+                            <div class="text-[8px] text-gray-500 uppercase font-black">Call Chg</div>
+                            <div id="totalCallOiChg" class="text-xs font-black text-red-500 leading-none">0</div>
+                        </div>
+                        <div class="text-right border-l border-white/5 pl-4">
+                            <div class="text-[8px] text-gray-500 uppercase font-black">Put Chg</div>
+                            <div id="totalPutOiChg" class="text-xs font-black text-green-500 leading-none">0</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex-1 min-h-0 relative">
+                    <canvas id="strikeWiseOiChangeChart"></canvas>
+                </div>
+                <!-- Mini Progress Bars at Bottom -->
+                <div class="flex gap-2 mt-1 shrink-0">
+                    <div class="flex-1 h-1 bg-red-500/20 rounded-full overflow-hidden"><div id="callChgBar" class="h-full bg-red-500" style="width: 0%"></div></div>
+                    <div class="flex-1 h-1 bg-green-500/20 rounded-full overflow-hidden"><div id="putChgBar" class="h-full bg-green-500" style="width: 0%"></div></div>
+                </div>
+            </div>
+
+            <!-- 4. Total OI Per Strike (Compact Card) -->
+            <div class="glass-panel rounded-xl p-3 shadow-sm flex flex-col min-h-0">
+                <div class="flex justify-between items-start mb-1 shrink-0">
+                    <h3 class="text-[10px] font-black uppercase tracking-wider text-gray-400">Strike-wise Total OI</h3>
+                    <div class="flex gap-4">
+                        <div class="text-right">
+                            <div class="text-[8px] text-gray-500 uppercase font-black">Total Call</div>
+                            <div id="totalCallOi" class="text-xs font-black text-red-500 leading-none">0</div>
+                        </div>
+                        <div class="text-right border-l border-white/5 pl-4">
+                            <div class="text-[8px] text-gray-500 uppercase font-black">Total Put</div>
+                            <div id="totalPutOi" class="text-xs font-black text-green-500 leading-none">0</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex-1 min-h-0 relative">
+                    <canvas id="strikeWiseTotalOiChart"></canvas>
+                </div>
+                <!-- Mini Progress Bars at Bottom -->
+                <div class="flex gap-2 mt-1 shrink-0">
+                    <div class="flex-1 h-1 bg-red-500/20 rounded-full overflow-hidden"><div id="callTotalBar" class="h-full bg-red-500" style="width: 0%"></div></div>
+                    <div class="flex-1 h-1 bg-green-500/20 rounded-full overflow-hidden"><div id="putTotalBar" class="h-full bg-green-500" style="width: 0%"></div></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/options_dashboard_app.js"></script>
+</body>
+</html>

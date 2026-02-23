@@ -1,0 +1,183 @@
+//@version=6
+indicator('small', overlay = true, max_labels_count = 500, max_boxes_count = 500,max_lines_count =500)
+import TradingView/ta/12
+
+
+// --- Inputs ---
+showBubble          = input.bool(true, 'Show Volume Bubble', inline = 'a')
+showBubbleLine      = input.bool(true, 'Show Volume Bubble Line', inline = 'a')
+showSR_DOTs         = input.bool(true, "Show MTF S/R Dots", inline = 'a')
+showColoredCandles  = input.bool(true, "show ▞ Bar Colored with volume% ", inline = 'b')
+
+bubbleVolumePeriod  = input.int(100, "Volume Length(50-500)", minval = 50, maxval = 500, inline = 'c', group = 'Volume Bubble')
+BubbleSize          = input.float(2.5, "Bubble Threshold", minval = 1.0, maxval = 17.0, step = 0.5, inline = 'c', group = 'Volume Bubble')
+BubbleSizeDelta     = input.float(0.75, "Bubble StepUp Delta STEP", minval = 0.5, maxval = 15, step = 0.25, inline = 'c', group = 'Volume Bubble')
+levels_qty          = input.int(100, 'Levels Qty', group = 'Volume Bubble', inline = '1')
+stdDevPeriod        = input.int(title="🔵🟠Std Dev Period", defval=48, inline = 'b', group = 'Volume Bubble')
+std_multiplier      = input.int(title="🔵🟠Std Dev factor", defval=4, inline = 'b', group =  'Volume Bubble')
+showDynPivotLine    = input.bool(true,"Show DYNAMIC Pivot line")
+showEVWMALine       = input.bool(true,"Show Elastic Vol line")
+
+
+// Function to find the next higher timeframes automatically
+get_auto_htfs() =>
+    // Standard TradingView timeframe list in seconds
+    // 60=1m, 300=5m, 900=15m, 3600=1h, 14400=4h, 86400=1D, 604800=1W
+    standard_seconds = array.from(60, 300, 900, 1800, 3600, 14400, 86400, 604800)
+    standard_strings = array.from("1", "5", "15", "30", "60", "240", "D", "W")
+
+    current_sec = timeframe.in_seconds()
+    string htf1 = ""
+    string htf2 = ""
+
+    for i = 0 to array.size(standard_seconds) - 1
+        if array.get(standard_seconds, i) > current_sec
+            if htf1 == ""
+                htf1 := array.get(standard_strings, i)
+            else if htf2 == ""
+                htf2 := array.get(standard_strings, i)
+                break
+
+    [htf1, htf2]
+
+// MTF Selection Inputs
+tf1_val = "" //input.timeframe("", "ChartTimeframe 1", group="MTF Custom Settings")
+// tf2_val = input.timeframe("5", "Timeframe 2", group="MTF Custom Settings")
+// tf3_val = input.timeframe("15", "Timeframe 3", group="MTF Custom Settings")
+[tf2_val,tf3_val] =get_auto_htfs()
+// --- Global Vars ---
+bodySize = math.abs(close - open)
+
+// --- MTF Fetching Function ---
+get_mtf_data() =>
+    m_bodySize = math.abs(close - open)
+    m_totalRange = high - low
+    m_stdDev = ta.stdev(volume, stdDevPeriod)
+    m_avgV = ta.sma(volume, stdDevPeriod)
+    m_norm = (volume - m_avgV) / (m_stdDev == 0 ? 1 : m_stdDev)
+
+    m_isSmallBody = (m_bodySize / (m_totalRange == 0 ? 1 : m_totalRange)) * 100 <= 10.0
+    m_upperShadow = high - math.max(open, close)
+    m_lowerShadow = math.min(open, close) - low
+    m_isBalancedWicks = math.abs(m_upperShadow - m_lowerShadow) / (m_totalRange == 0 ? 1 : m_totalRange) * 100 <= 50.0
+    m_doji = m_isSmallBody and m_isBalancedWicks
+    m_closePos = (close - low) / (m_totalRange == 0 ? 1 : m_totalRange) * 100
+    m_top = m_closePos >= 80.0
+    m_bot = m_closePos <= 20.0
+
+    m_cond = (math.sum(volume, 2) / 2 - m_avgV) > std_multiplier * m_stdDev or volume - m_avgV > std_multiplier * m_stdDev
+    var float m_supp = na
+    var float m_rest = na
+    m_supp := m_cond and close > open[std_multiplier] ? low : m_supp[1]
+    m_rest := m_cond and close < open[std_multiplier] ? high : m_rest[1]
+
+    [m_norm, hlcc4, close > open, m_doji, m_top, m_bot, m_supp, m_rest]
+
+// Request Dynamic MTF Data
+[vol1, src1, up1, doji1, top1, bot1, s1, r1] = request.security(syminfo.tickerid, tf1_val, get_mtf_data(), lookahead = barmerge.lookahead_off)
+[vol2, src2, up2, doji2, top2, bot2, s2, r2] = request.security(syminfo.tickerid, tf2_val, get_mtf_data(), lookahead = barmerge.lookahead_off)
+[vol3, src3, up3, doji3, top3, bot3, s3, r3] = request.security(syminfo.tickerid, tf3_val, get_mtf_data(), lookahead = barmerge.lookahead_off)
+
+// --- Plotting S/R Dots ---
+plotshape(showSR_DOTs ? s1 : na, title="TF1 S", style=shape.circle, location=location.absolute, color=color.new(color.blue, 40), size=size.tiny)
+plotshape(showSR_DOTs ? r1 : na, title="TF1 R", style=shape.circle, location=location.absolute, color=color.new(color.orange, 40), size=size.tiny)
+
+plotshape(showSR_DOTs ? s2 : na, title="TF2 S", style=shape.circle, location=location.absolute, color=color.new(color.blue, 20), size=size.small)
+plotshape(showSR_DOTs ? r2 : na, title="TF2 R", style=shape.circle, location=location.absolute, color=color.new(color.orange, 20), size=size.small)
+
+plotshape(showSR_DOTs ? s3 : na, title="TF3 S", style=shape.xcross, location=location.absolute, color=color.new(color.blue, 0), size=size.small)
+plotshape(showSR_DOTs ? r3 : na, title="TF3 R", style=shape.xcross, location=location.absolute, color=color.new(color.orange, 0), size=size.small)
+
+
+
+// --- Bar Coloring ---
+volumePercent = volume / ta.sma(volume, 20)
+color cCol = na
+if showColoredCandles
+    bCol = close >= open ? color.rgb(3, 179, 9) : #d30101
+    cCol := volumePercent >= 3 ? (close >= open ? #007504 : color.rgb(137, 1, 1)) :
+           volumePercent >= 2 ? (close >= open ? color.rgb(3, 179, 9) : #d30101) :
+           volumePercent >= 1.6 ? color.new(bCol, 10) :
+           volumePercent >= 1.2 ? color.new(bCol, 30) :
+           volumePercent >= 0.8 ? color.new(bCol, 60) :
+           volumePercent >= 0.5 ? color.new(bCol, 80) : color.new(bCol, 90)
+barcolor(showColoredCandles ? cCol : na)
+plotcandle(open, high, low, close, "colorCandle", cCol, cCol, editable=true, bordercolor=cCol,  force_overlay=true)
+bubblesize = math.max(math.round(volume / math.avg(ta.sma(volume, bubbleVolumePeriod), ta.sma(volume, 10))), math.round(ta.dema(volume, 3) / math.avg(ta.sma(volume, bubbleVolumePeriod), ta.sma(volume, 10))))
+size5 = bubblesize > BubbleSize + 8 * BubbleSizeDelta
+size4 = bubblesize > BubbleSize + 4 * BubbleSizeDelta
+size3 = bubblesize > BubbleSize + 2 * BubbleSizeDelta
+size2 = bubblesize > BubbleSize + BubbleSizeDelta
+size1 = bubblesize > BubbleSize
+
+candlecol = close > open ? color.blue : close < open ? color.red : color.gray
+// const location locationBubble = close > open?location.abovebar:location.belowbar
+
+plotshape(close > open and showBubble and size5 ? close : na,               "Bubble 5", shape.circle, location.belowbar, color.new(candlecol, 50), size = size.huge, force_overlay = true)
+plotshape(close > open and showBubble and size4 and not size5 ? close : na, "Bubble 4", shape.circle, location.belowbar, color.new(candlecol, 50), size = size.large, force_overlay = true)
+plotshape(close > open and showBubble and size3 and not size4 ? close : na, "Bubble 3", shape.circle, location.belowbar, color.new(candlecol, 50), size = size.normal, force_overlay = true)
+plotshape(close > open and showBubble and size2 and not size3 ? close : na, "Bubble 2", shape.circle, location.belowbar, color.new(candlecol, 50), size = size.small, force_overlay = true)
+plotshape(close > open and showBubble and size1 and not size2 ? close : na, "Bubble 1", shape.circle, location.belowbar, color.new(candlecol, 50), size = size.tiny, force_overlay = true)
+
+plotshape(close < open and showBubble and size5 ? close : na,               "Bubble 5", shape.circle, location.abovebar, color.new(candlecol, 50), size = size.huge, force_overlay = true)
+plotshape(close < open and showBubble and size4 and not size5 ? close : na, "Bubble 4", shape.circle, location.abovebar, color.new(candlecol, 50), size = size.large, force_overlay = true)
+plotshape(close < open and showBubble and size3 and not size4 ? close : na, "Bubble 3", shape.circle, location.abovebar, color.new(candlecol, 50), size = size.normal, force_overlay = true)
+plotshape(close < open and showBubble and size2 and not size3 ? close : na, "Bubble 2", shape.circle, location.abovebar, color.new(candlecol, 50), size = size.small, force_overlay = true)
+plotshape(close < open and showBubble and size1 and not size2 ? close : na, "Bubble 1", shape.circle, location.abovebar, color.new(candlecol, 50), size = size.tiny, force_overlay = true)
+
+
+
+// --- Line Drawing Logic ---
+processLines(v_norm, v_src, v_up, v_doji, v_top, v_bot) =>
+    if showBubbleLine
+        step = (v_norm - BubbleSize) / BubbleSizeDelta
+        if step >= 4
+            baseCOLOR = v_doji ? color.gray : v_top ? color.green : v_bot ? #d32626 : v_up ? color.aqua : color.orange
+            grad_col = color.from_gradient(v_norm, 0.1, 6.0, color.new(baseCOLOR, 50), color.new(baseCOLOR, 5))
+            w = step >= 8 ? 4 : step >= 6 ? 3 : 2
+            line.new(bar_index, v_src, last_bar_index, v_src, xloc.bar_index, extend.none, grad_col, width = w)
+
+// Process MTF lines triggered by time changes
+if not na(ta.change(time(tf1_val)))
+    processLines(vol1, src1, up1, doji1, top1, bot1)
+if not na(ta.change(time(tf2_val)))
+    processLines(vol2, src2, up2, doji2, top2, bot2)
+if not na(ta.change(time(tf3_val)))
+    processLines(vol3, src3, up3, doji3, top3, bot3)
+
+// Cleanup
+a_allLines = line.all
+if array.size(a_allLines) > levels_qty
+    line.delete(array.shift(a_allLines))
+
+// --- Dynamic Pivot / EVWMA ---
+calc_evwma(price, length, vol) =>
+    float data = 0.0
+    shares = math.sum(vol, length)
+    data := (nz(data[1]) * (shares - vol) / (shares == 0 ? 1 : shares)) + (vol * price / (shares == 0 ? 1 : shares))
+    data
+
+evmaLen = input.int(5, "Elastic Volume Weighted MA", group = "Dyn Force")
+evmaVal = calc_evwma(close, evmaLen, volume)
+plot(showEVWMALine ? evmaVal : na, "EVWMA", evmaVal > math.max(evmaVal[1],evmaVal[2],evmaVal[3]) ? color.rgb(99, 197, 140) :   evmaVal < math.min(evmaVal[1],evmaVal[2],evmaVal[3]) ? #e44451 : color.gray, linewidth = 3)
+
+
+dynamicPivot(forceLen, pivotLen) =>
+    pC = close - open
+    mB = ta.highest(math.abs(close - open), forceLen)
+    sc = math.abs(close - open) / (mB == 0.0 ? 1.0 : mB)
+    vw = ta.vwap(close)
+    uF = pC > 0 ? volume * sc * (close > vw ? 1.5 : 1.0) : 0.0
+    dF = pC < 0 ? volume * sc * (close < vw ? 1.5 : 1.0) : 0.0
+    sU = ta.sma(uF, forceLen), sD = ta.sma(dF, forceLen)
+    netF = sU - sD
+    baseP = ta.sma(pC > 0 ? high : low, pivotLen)
+    fS = ta.sma(math.abs(ta.change(close)) / close, pivotLen)
+    hN = ta.highest(math.abs(netF), pivotLen)
+    fA = netF / (hN == 0 ? 1 : hN)
+    dP = baseP + nz((fA * close * nz(fS, 0)), 0)
+    // [dP, calc_evwma(dP, pivotLen, volume)]
+    dP
+dynP = dynamicPivot(20, 10)
+plot(showDynPivotLine ? dynP : na, 'dynPivot', dynP > nz(dynP[1]) ? color.green : color.red, linewidth=2, style=plot.style_linebr)
+/////////////////

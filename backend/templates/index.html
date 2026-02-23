@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRODESK | TradingView Chart</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,800&display=swap');
+
+        :root {
+            --bg-main: #0f172a;
+            --bg-panel: rgba(30, 41, 59, 0.7);
+            --text-primary: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-subtle: rgba(255, 255, 255, 0.05);
+            --color-primary: #3b82f6;
+            --input-bg: #1e293b;
+            --btn-bg-muted: #334155;
+            --btn-text: #ffffff;
+            --header-group-bg: rgba(0, 0, 0, 0.4);
+        }
+
+        body.light-theme {
+            --bg-main: #f1f5f9;
+            --bg-panel: rgba(255, 255, 255, 0.8);
+            --text-primary: #0f172a;
+            --text-muted: #475569;
+            --border-subtle: rgba(0, 0, 0, 0.1);
+            --input-bg: #ffffff;
+            --btn-bg-muted: #e2e8f0;
+            --btn-text: #0f172a;
+            --header-group-bg: rgba(0, 0, 0, 0.05);
+        }
+
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-main); color: var(--text-primary); overflow: hidden; transition: background-color 0.3s, color 0.3s; letter-spacing: -0.01em; }
+        .glass-panel { background: var(--bg-panel); backdrop-filter: blur(12px); border: 1px solid var(--border-subtle); }
+
+        /* Theme overrides */
+        body.light-theme .text-gray-400 { color: var(--text-muted) !important; }
+        body.light-theme .text-gray-300 { color: var(--text-muted) !important; }
+        body.light-theme .bg-gray-900 { background-color: var(--input-bg) !important; border-color: var(--border-subtle) !important; color: var(--text-primary) !important; }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
+        .loading-bar { height: 2px; background: linear-gradient(to right, #3b82f6, #60a5fa); animation: loading 2s infinite; }
+        @keyframes loading { 0% { width: 0; } 50% { width: 100%; } 100% { width: 0; } }
+
+        .chart-wrapper { position: relative; width: 100%; height: 100%; border: 2px solid transparent; border-radius: 4px; overflow: hidden; }
+        .chart-wrapper.active { border-color: #3b82f6; }
+        .chart-container { width: 100%; height: 100%; }
+        .oi-profile-canvas { position: absolute; top: 0; right: 0; pointer-events: none; z-index: 5; }
+        .chart-label { position: absolute; top: 10px; left: 10px; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+        .chart-controls { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; gap: 4px; background: rgba(0,0,0,0.6); padding: 4px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(4px); opacity: 0; transition: opacity 0.2s; }
+        .chart-wrapper:hover .chart-controls { opacity: 1; }
+        .chart-ctrl-btn { padding: 4px; border-radius: 9999px; color: #94a3b8; transition: all 0.2s; display: flex; align-items: center; justify-content: center; }
+        .chart-ctrl-btn:hover { background: rgba(255,255,255,0.1); color: white; }
+
+        /* Search results visibility */
+        .search-item { transition: background-color 0.2s; }
+        .search-item:hover { background-color: rgba(59, 130, 246, 0.2) !important; }
+        .search-item em { font-style: normal; color: #fff; background-color: rgba(59, 130, 246, 0.4); border-radius: 2px; padding: 0 1px; }
+    </style>
+</head>
+<body class="h-full flex flex-col">
+    <div id="loading" class="hidden absolute top-0 left-0 w-full z-[100] loading-bar"></div>
+
+    <header class="h-14 py-2 glass-panel border-b border-white/5 sticky top-0 z-50 px-4 md:px-6 flex items-center" role="banner">
+        <div class="flex items-center justify-between w-full gap-4">
+            <!-- Brand & Navigation -->
+            <div class="flex items-center gap-4 shrink-0">
+                <a href="/" class="text-sm font-black text-white italic tracking-tighter uppercase shrink-0">PRO<span class="text-blue-500">DESK</span></a>
+                <nav class="hidden lg:flex items-center gap-3" role="navigation">
+                    <a href="/options" class="text-[10px] font-bold text-gray-500 hover:text-blue-500 transition-colors uppercase tracking-widest">Options</a>
+                    <a href="/orderflow" class="text-[10px] font-bold text-gray-500 hover:text-blue-500 transition-colors uppercase tracking-widest">Orderflow</a>
+                    <a href="/symmetry" class="text-[10px] font-bold text-gray-500 hover:text-blue-500 transition-colors uppercase tracking-widest text-blue-400">Symmetry</a>
+                    <a href="/db-viewer" class="text-[10px] font-bold text-gray-500 hover:text-blue-500 transition-colors uppercase tracking-widest">DB</a>
+                </nav>
+            </div>
+
+            <!-- Search Area -->
+            <div class="relative flex-1 max-w-xl mx-4">
+                <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <svg class="w-4 h-4 text-blue-500/70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                </div>
+                <input type="text" id="symbolSearch" placeholder="SEARCH SYMBOL (e.g. NSE:NIFTY)..." class="bg-gray-900 border border-white/10 rounded-full pl-11 pr-6 py-2 text-xs font-black outline-none focus:ring-2 focus:ring-blue-500 transition-all w-full shadow-inner tracking-wider" style="color: var(--text-primary);" aria-label="Search symbols">
+                <div id="searchResults" class="hidden absolute top-full left-0 w-full bg-gray-900 border border-white/10 rounded-2xl mt-2 z-[100] max-h-96 overflow-y-auto custom-scrollbar shadow-2xl backdrop-blur-xl" aria-live="polite">
+                </div>
+            </div>
+
+            <!-- Controls Groups -->
+            <div class="flex items-center gap-3">
+                <!-- Group: Timeframe & Layout -->
+                <div class="flex items-center gap-2 p-1 rounded-full border border-white/10 shadow-lg" style="background: var(--header-group-bg);">
+                    <div id="timeframeSelector" class="flex items-center gap-1 px-1">
+                        <button data-interval="1" class="tf-btn active px-3 py-1.5 text-[10px] font-black rounded-full transition-all hover:bg-white/5 [&.active]:bg-blue-600 [&.active]:text-white">1</button>
+                        <button data-interval="3" class="tf-btn px-3 py-1.5 text-[10px] font-black rounded-full transition-all hover:bg-white/5 [&.active]:bg-blue-600 [&.active]:text-white">3</button>
+                        <button data-interval="5" class="tf-btn px-3 py-1.5 text-[10px] font-black rounded-full transition-all hover:bg-white/5 [&.active]:bg-blue-600 [&.active]:text-white">5</button>
+                        <button data-interval="15" class="tf-btn px-3 py-1.5 text-[10px] font-black rounded-full transition-all hover:bg-white/5 [&.active]:bg-blue-600 [&.active]:text-white">15</button>
+                        <button data-interval="30" class="tf-btn px-3 py-1.5 text-[10px] font-black rounded-full transition-all hover:bg-white/5 [&.active]:bg-blue-600 [&.active]:text-white">30</button>
+                        <button data-interval="60" class="tf-btn px-3 py-1.5 text-[10px] font-black rounded-full transition-all hover:bg-white/5 [&.active]:bg-blue-600 [&.active]:text-white">60</button>
+                        <button data-interval="120" class="tf-btn px-3 py-1.5 text-[10px] font-black rounded-full transition-all hover:bg-white/5 [&.active]:bg-blue-600 [&.active]:text-white">120</button>
+                        <button data-interval="240" class="tf-btn px-3 py-1.5 text-[10px] font-black rounded-full transition-all hover:bg-white/5 [&.active]:bg-blue-600 [&.active]:text-white">240</button>
+                        <button data-interval="D" class="tf-btn px-3 py-1.5 text-[10px] font-black rounded-full transition-all hover:bg-white/5 [&.active]:bg-blue-600 [&.active]:text-white">D</button>
+                        <button data-interval="W" class="tf-btn px-3 py-1.5 text-[10px] font-black rounded-full transition-all hover:bg-white/5 [&.active]:bg-blue-600 [&.active]:text-white">W</button>
+                    </div>
+                    <div class="w-px h-5 bg-white/10 mx-1"></div>
+                <div id="layoutSelector" class="flex items-center gap-1 px-1" role="group" aria-label="Chart layout">
+                    <button data-layout="1" class="layout-btn active p-2 rounded-full transition-all hover:bg-white/5 text-gray-500 [&.active]:text-blue-500 [&.active]:bg-blue-500/10" title="1 Chart" aria-pressed="true">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" rx="1"/></svg>
+                        </button>
+                    <button data-layout="2" class="layout-btn p-2 rounded-full transition-all hover:bg-white/5 text-gray-500 [&.active]:text-blue-500 [&.active]:bg-blue-500/10" title="2 Charts" aria-pressed="false">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><rect x="3" y="3" width="6" height="14" rx="1"/><rect x="11" y="3" width="6" height="14" rx="1"/></svg>
+                        </button>
+                    <button data-layout="4" class="layout-btn p-2 rounded-full transition-all hover:bg-white/5 text-gray-500 [&.active]:text-blue-500 [&.active]:bg-blue-500/10" title="4 Charts" aria-pressed="false">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="14" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/></svg>
+                        </button>
+                    </div>
+                    <div class="w-px h-5 bg-white/10 mx-1"></div>
+                    <select id="chartTypeSelector" class="bg-transparent text-[10px] font-black text-gray-400 outline-none cursor-pointer hover:text-white uppercase tracking-tighter">
+                        <option value="candles">Candles</option>
+                        <option value="bars">Bars (OHLC)</option>
+                        <option value="line">Line</option>
+                        <option value="area">Area</option>
+                    </select>
+                </div>
+
+                <!-- Group: Analysis & Tools -->
+                <div id="normalControls" class="flex items-center gap-2">
+                    <div class="flex items-center gap-1 p-1 rounded-full border border-white/5" style="background: var(--header-group-bg);">
+                        <label class="flex items-center gap-1.5 cursor-pointer px-2 py-1 rounded-full hover:bg-white/5 transition-all">
+                            <input type="checkbox" id="oiProfileToggle" class="w-3 h-3 rounded text-blue-500 focus:ring-0 bg-gray-800 border-gray-700">
+                            <span class="text-[9px] font-black text-gray-400 uppercase tracking-tighter">OI</span>
+                        </label>
+                        <label class="flex items-center gap-1.5 cursor-pointer px-2 py-1 rounded-full hover:bg-white/5 transition-all">
+                            <input type="checkbox" id="analysisToggle" class="w-3 h-3 rounded text-blue-500 focus:ring-0 bg-gray-800 border-gray-700" checked>
+                            <span class="text-[9px] font-black text-gray-400 uppercase tracking-tighter">Analysis</span>
+                        </label>
+                    </div>
+
+                    <div class="flex items-center gap-1">
+                        <button id="toggleIndicatorsBtn" class="hidden"></button>
+                        <button id="replayModeBtn" class="text-[10px] font-black px-4 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-full text-white transition-all uppercase tracking-tight shadow-md shadow-blue-500/20 active:scale-95">Replay</button>
+                    </div>
+
+
+                    <div class="flex items-center gap-1 p-1 rounded-full border border-white/5" style="background: var(--header-group-bg);">
+                        <button id="themeToggleBtn" class="p-1.5 hover:bg-white/5 rounded-full text-gray-400 transition-colors" title="Toggle Theme">
+                            <svg id="sunIcon" class="hidden w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd"/></svg>
+                            <svg id="moonIcon" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/></svg>
+                        </button>
+                        <button id="maximizeBtn" class="p-1.5 hover:bg-white/5 rounded-full text-gray-400 transition-colors" title="Open in New Tab">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="replayControls" class="hidden flex items-center gap-2 bg-blue-900/20 p-1 rounded-full border border-blue-500/30">
+                    <span id="replayStatus" class="text-[9px] font-black text-blue-400 px-2 uppercase tracking-tighter">SELECT START POINT</span>
+                    <button id="replayPrevBtn" class="hover:bg-blue-500/20 p-1 rounded-full text-blue-400 disabled:opacity-30" disabled>
+                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M8.445 14.832A1 1 0 0010 14v-2.798l5.445 3.63A1 1 0 0017 14V6a1 1 0 00-1.555-.832L10 8.798V6a1 1 0 00-1.555-.832l-6 4a1 1 0 000 1.664l6 4z"/></svg>
+                    </button>
+                    <button id="replayPlayBtn" class="hover:bg-blue-500/20 p-1 rounded-full text-blue-400 disabled:opacity-30" disabled>
+                        <svg id="playIcon" class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M4.5 3.5v13L16.5 10l-12-6.5z"/></svg>
+                        <svg id="pauseIcon" class="hidden w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+                    </button>
+                    <button id="replayNextBtn" class="hover:bg-blue-500/20 p-1 rounded-full text-blue-400 disabled:opacity-30" disabled>
+                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M11.555 14.832l6-4a1 1 0 000-1.664l-6-4A1 1 0 0010 6v2.798L4.555 5.168A1 1 0 003 6v8a1 1 0 001.555.832L10 11.202V14a1 1 0 001.555.832z"/></svg>
+                    </button>
+                    <button id="exitReplayBtn" class="text-[9px] font-bold px-3 py-1 hover:bg-red-900/40 rounded-full text-red-400 transition-colors">EXIT</button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 p-1 flex flex-row overflow-hidden bg-[var(--bg-main)] relative">
+        <div id="chartsContainer" class="grid grid-cols-1 grid-rows-1 gap-1 flex-1 h-full">
+            <!-- Charts will be injected here by app.js -->
+        </div>
+
+        <!-- Analysis Sidebar -->
+        <div id="analysisSidebar" class="hidden w-80 glass-panel border-l border-black/5 flex flex-col overflow-hidden transition-all duration-300">
+            <div class="p-4 border-b border-black/5 flex justify-between items-center bg-gray-900/10">
+                <h3 class="text-xs font-black uppercase italic tracking-widest text-blue-500">Analysis Center</h3>
+                <button id="closeAnalysisBtn" class="text-gray-400 hover:text-black">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div id="sidebarContent" class="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
+                <!-- Genie Insights -->
+                <div class="space-y-2">
+                    <h4 class="text-[9px] font-black text-gray-500 uppercase tracking-tighter">OiGenie Prediction</h4>
+                    <div class="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg">
+                        <div id="genieControl" class="text-xs font-black text-gray-800 uppercase">-</div>
+                        <div id="genieStatus" class="text-[9px] font-bold text-gray-500 mt-1 uppercase">-</div>
+                        <div id="genieRange" class="text-[10px] text-blue-500 font-bold mt-2">-</div>
+                    </div>
+                </div>
+                <!-- OI Buildup -->
+                <div class="space-y-2">
+                    <h4 class="text-[9px] font-black text-gray-500 uppercase tracking-tighter">OI Buildup Pulse</h4>
+                    <div id="buildupSummary" class="grid grid-cols-2 gap-2">
+                        <!-- Dynamic -->
+                    </div>
+                </div>
+                <!-- Symmetry & Panic Pulse -->
+                <div id="sidebarSymmetry" class="space-y-2">
+                    <h4 class="text-[9px] font-black text-gray-500 uppercase tracking-tighter">Symmetry & Panic Pulse</h4>
+                    <div id="symmetryActiveSignal" class="p-3 bg-green-500/10 border border-green-500/20 rounded-lg hidden">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <div id="symType" class="text-xs font-black text-green-500 uppercase">BUY CE</div>
+                                <div id="symScore" class="text-[9px] font-bold text-gray-400">Score: 4/4</div>
+                            </div>
+                            <div class="text-right">
+                                <div id="symPnL" class="text-xs font-black text-white">+0.00%</div>
+                                <div class="text-[8px] text-gray-500">LIVE PNL</div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 mt-3 pt-2 border-t border-white/5">
+                            <div>
+                                <div class="text-[8px] text-gray-500 uppercase">SL</div>
+                                <div id="symSL" class="text-[10px] font-bold text-red-400">0.00</div>
+                            </div>
+                            <div>
+                                <div class="text-[8px] text-gray-500 uppercase">TP</div>
+                                <div id="symTP" class="text-[10px] font-bold text-blue-400">0.00</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="noSymmetrySignal" class="p-4 bg-black/5 border border-white/5 rounded-lg text-center">
+                        <p class="text-[10px] text-gray-500 font-bold uppercase italic">No Active Symmetry Signal</p>
+                    </div>
+                </div>
+
+                <!-- Scalper Confluence -->
+                <div id="sidebarScalper" class="space-y-2 hidden">
+                    <h4 class="text-[9px] font-black text-gray-500 uppercase tracking-tighter">Scalper Metrics</h4>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="p-2 bg-black/5 rounded border border-black/5">
+                            <div class="text-[8px] text-gray-500 uppercase">PCR</div>
+                            <div id="side-pcr" class="text-xs font-black" style="color: var(--text-primary);">-</div>
+                        </div>
+                        <div class="p-2 bg-black/5 rounded border border-black/5">
+                            <div class="text-[8px] text-gray-500 uppercase">Power</div>
+                            <div id="side-power" class="text-xs font-black" style="color: var(--text-primary);">-</div>
+                        </div>
+                    </div>
+                    <div id="side-confluence" class="grid grid-cols-5 gap-1 mt-2">
+                        <!-- Confluence Dots -->
+                        <div id="conf-lvl-dot" class="h-1 rounded bg-gray-200" title="Level Hunt"></div>
+                        <div id="conf-pcr-dot" class="h-1 rounded bg-gray-200" title="PCR Trend"></div>
+                        <div id="conf-oi-dot" class="h-1 rounded bg-gray-200" title="OI Spurt"></div>
+                        <div id="conf-brk-dot" class="h-1 rounded bg-gray-200" title="Option Breakout"></div>
+                        <div id="conf-inv-dot" class="h-1 rounded bg-gray-200" title="Inverse Confirmation"></div>
+                    </div>
+                </div>
+                <!-- Recent Logs -->
+                <div class="space-y-2">
+                    <h4 class="text-[9px] font-black text-gray-500 uppercase tracking-tighter">Signal Pulse</h4>
+                    <div id="sideLogsList" class="space-y-1 font-mono text-[9px] bg-black/5 p-2 rounded max-h-60 overflow-y-auto custom-scrollbar">
+                        <p class="text-gray-400 italic">Waiting for signals...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Indicator Management Panel (Legacy) -->
+        <div id="indicatorPanel" class="hidden absolute top-4 right-4 w-64 glass-panel rounded-xl p-4 z-[60] shadow-2xl border border-white/10">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xs font-black uppercase italic tracking-wider">Indicator Plots</h3>
+                <button id="closeIndicatorPanel" class="text-gray-400 hover:text-white">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div id="indicatorList" class="space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
+                <!-- Plot items injected by app.js -->
+            </div>
+        </div>
+
+        <!-- NEW: Pro-Analysis Settings Modal -->
+        <div id="analysisSettingsModal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div class="w-96 glass-panel rounded-2xl p-6 shadow-2xl border border-white/10">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-sm font-black uppercase italic tracking-widest text-blue-500">Pro-Analysis Settings</h3>
+                    <button id="closeSettingsBtn" class="text-gray-400 hover:text-white">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+
+                <div class="space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar pr-2">
+                    <!-- Visibility Toggles -->
+                    <div class="grid grid-cols-2 gap-2 pb-4 border-b border-white/5">
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-all">
+                            <input type="checkbox" id="show_bubbles" checked class="w-3 h-3 rounded text-blue-500 bg-gray-800 border-gray-700">
+                            <span class="text-[9px] font-black text-gray-400 uppercase">Bubbles</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-all">
+                            <input type="checkbox" id="show_rays" checked class="w-3 h-3 rounded text-blue-500 bg-gray-800 border-gray-700">
+                            <span class="text-[9px] font-black text-gray-400 uppercase">Rays</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-all">
+                            <input type="checkbox" id="show_ema" checked class="w-3 h-3 rounded text-blue-500 bg-gray-800 border-gray-700">
+                            <span class="text-[9px] font-black text-gray-400 uppercase">EMA</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-all">
+                            <input type="checkbox" id="show_evwma" checked class="w-3 h-3 rounded text-blue-500 bg-gray-800 border-gray-700">
+                            <span class="text-[9px] font-black text-gray-400 uppercase">EVWMA</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-all">
+                            <input type="checkbox" id="show_dyn_pivot" checked class="w-3 h-3 rounded text-blue-500 bg-gray-800 border-gray-700">
+                            <span class="text-[9px] font-black text-gray-400 uppercase">Dyn Pivot</span>
+                        </label>
+                    </div>
+
+                    <!-- EMA Spans -->
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-black text-gray-500 uppercase">EMA 1 Span</label>
+                            <input type="number" id="ema_9" value="9" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500 transition-all">
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-black text-gray-500 uppercase">EMA 2 Span</label>
+                            <input type="number" id="ema_20" value="20" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500 transition-all">
+                        </div>
+                    </div>
+
+                    <!-- Volume Logic -->
+                    <div class="space-y-3 pt-2 border-t border-white/5">
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-black text-gray-500 uppercase">RVOL Period</label>
+                            <input type="number" id="rvol_len" value="20" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500 transition-all">
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-black text-gray-500 uppercase">RVOL Threshold (x)</label>
+                            <input type="number" step="0.1" id="rvol_threshold" value="2.0" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500 transition-all">
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-black text-gray-500 uppercase">Bubble Ratio Threshold</label>
+                            <input type="number" step="0.1" id="bubble_threshold" value="2.5" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500 transition-all">
+                        </div>
+                    </div>
+
+                    <!-- Ray Logic -->
+                    <div class="space-y-3 pt-2 border-t border-white/5">
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-black text-gray-500 uppercase">Ray Wick Ratio (x)</label>
+                            <input type="number" step="0.1" id="ray_wick_ratio" value="1.5" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500 transition-all">
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-black text-gray-500 uppercase">Max Rays Count</label>
+                            <input type="number" id="max_rays" value="50" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500 transition-all">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-8 flex gap-3">
+                    <button id="resetAnalysisBtn" class="flex-1 py-3 text-[10px] font-black uppercase tracking-widest border border-white/10 rounded-xl hover:bg-white/5 transition-all">Reset</button>
+                    <button id="applyAnalysisBtn" class="flex-1 py-3 text-[10px] font-black uppercase tracking-widest bg-blue-600 rounded-xl hover:bg-blue-500 transition-all shadow-lg shadow-blue-600/20">Apply</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        window.INITIAL_CONFIG = {
+            symbol: "{{ initial_symbol }}",
+            interval: "{{ initial_interval }}"
+        };
+    </script>
+    <script src="/static/app.js?v=4"></script>
+</body>
+</html>

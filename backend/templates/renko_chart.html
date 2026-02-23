@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Renko Chart | PRODESK</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,800&display=swap');
+
+        :root {
+            --bg-main: #0f172a;
+            --bg-panel: rgba(30, 41, 59, 0.7);
+            --text-primary: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-subtle: rgba(255, 255, 255, 0.05);
+            --color-primary: #3b82f6;
+        }
+
+        body.light-theme {
+            --bg-main: #f1f5f9;
+            --bg-panel: rgba(255, 255, 255, 0.8);
+            --text-primary: #0f172a;
+            --text-muted: #475569;
+            --border-subtle: rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            overflow: hidden;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .glass-panel {
+            background: var(--bg-panel);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .chart-container {
+            width: 100%;
+            height: calc(100vh - 60px);
+        }
+
+        #symbol-info {
+            position: absolute;
+            top: 70px;
+            left: 20px;
+            z-index: 10;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="h-full flex flex-col light-theme">
+    <header class="h-14 py-2 glass-panel border-b border-white/5 sticky top-0 z-50 px-4 flex items-center justify-between" role="banner">
+        <div class="flex items-center gap-4">
+            <a href="/" class="text-sm font-black text-blue-500 italic tracking-tighter uppercase">PRO<span class="text-gray-500">DESK</span> RENKO</a>
+            <div class="h-6 w-px bg-white/10 mx-2"></div>
+            <div id="display-symbol" class="text-xs font-black uppercase tracking-widest text-blue-500" aria-label="Symbol">-</div>
+            <div id="status-indicator" class="flex items-center gap-1.5 ml-4" aria-live="polite">
+                <div id="status-dot" class="w-2 h-2 rounded-full bg-gray-400"></div>
+                <span id="status-text" class="text-[10px] font-bold text-gray-400 uppercase">Connecting...</span>
+            </div>
+        </div>
+
+        <nav class="flex items-center gap-3">
+            <!-- Normal Controls -->
+            <div id="normal-controls" class="flex items-center gap-3">
+                <div class="flex items-center gap-2 bg-black/10 rounded-full px-3 py-1">
+                    <label for="box-size-input" class="text-[10px] font-bold text-gray-400 uppercase">Box Size:</label>
+                    <input type="number" id="box-size-input" value="10" class="bg-transparent text-[10px] font-black w-12 outline-none text-blue-500" min="1" step="0.5">
+                </div>
+                <button id="replay-mode-btn" class="text-[10px] font-black px-4 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-full text-white transition-all uppercase tracking-tight shadow-md shadow-blue-500/20 active:scale-95">Replay</button>
+            </div>
+
+            <!-- Replay Controls -->
+            <div id="replay-controls" class="hidden flex items-center gap-2 bg-blue-900/20 p-1 rounded-full border border-blue-500/30">
+                <span id="replay-status" class="text-[9px] font-black text-blue-400 px-2 uppercase tracking-tighter">SELECT START POINT</span>
+                <button id="replay-prev-btn" class="hover:bg-blue-500/20 p-1 rounded-full text-blue-400 disabled:opacity-30" disabled>
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M8.445 14.832A1 1 0 0010 14v-2.798l5.445 3.63A1 1 0 0017 14V6a1 1 0 00-1.555-.832L10 8.798V6a1 1 0 00-1.555-.832l-6 4a1 1 0 000 1.664l6 4z"/></svg>
+                </button>
+                <button id="replay-play-btn" class="hover:bg-blue-500/20 p-1 rounded-full text-blue-400 disabled:opacity-30" disabled>
+                    <svg id="play-icon" class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M4.5 3.5v13L16.5 10l-12-6.5z"/></svg>
+                    <svg id="pause-icon" class="hidden w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+                </button>
+                <button id="replay-next-btn" class="hover:bg-blue-500/20 p-1 rounded-full text-blue-400 disabled:opacity-30" disabled>
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M11.555 14.832l6-4a1 1 0 000-1.664l-6-4A1 1 0 0010 6v2.798L4.555 5.168A1 1 0 003 6v8a1 1 0 001.555.832L10 11.202V14a1 1 0 001.555.832z"/></svg>
+                </button>
+                <button id="exit-replay-btn" class="text-[9px] font-bold px-3 py-1 hover:bg-red-900/40 rounded-full text-red-400 transition-colors">EXIT</button>
+            </div>
+
+            <button id="theme-toggle" class="p-2 hover:bg-black/5 rounded-full transition-colors">
+                <svg id="sun-icon" class="hidden w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"/></svg>
+                <svg id="moon-icon" class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/></svg>
+            </button>
+        </nav>
+    </header>
+
+    <main class="flex-1 relative bg-[var(--bg-main)]">
+        <div id="symbol-info">
+            <div id="last-price" class="text-3xl font-black tracking-tighter">-</div>
+            <div id="change-info" class="text-xs font-bold mt-1">-</div>
+        </div>
+        <div id="chart" class="chart-container"></div>
+    </main>
+
+    <script src="/static/renko_chart_app.js"></script>
+</body>
+</html>
