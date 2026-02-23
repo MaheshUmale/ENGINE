@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRODESK | Symmetry Engine</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,800&display=swap');
+        :root {
+            --bg-main: #0f172a;
+            --bg-panel: rgba(30, 41, 59, 0.7);
+            --text-primary: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-subtle: rgba(255, 255, 255, 0.05);
+            --color-primary: #3b82f6;
+        }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-main); color: var(--text-primary); }
+        .glass-panel { background: var(--bg-panel); backdrop-filter: blur(16px); border: 1px solid var(--border-subtle); }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .stat-card { transition: transform 0.2s; }
+        .stat-card:hover { transform: translateY(-2px); }
+    </style>
+</head>
+<body class="h-full flex flex-col overflow-hidden custom-scrollbar">
+    <header class="h-14 py-2 glass-panel border-b border-white/5 px-4 md:px-6 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-4">
+            <a href="/" class="text-sm font-black text-white italic tracking-tighter uppercase">PRO<span class="text-blue-500">DESK</span> <span class="text-xs not-italic font-bold text-gray-500 ml-1">SYMMETRY</span></a>
+            <div class="h-4 w-px bg-white/10 mx-2"></div>
+            <div id="bot-status" class="flex items-center gap-2">
+                <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                <span class="text-[9px] font-black text-green-500 uppercase tracking-widest">Bot Active</span>
+            </div>
+        </div>
+        <div class="flex gap-4">
+             <a href="/" class="text-[10px] font-bold text-gray-500 hover:text-blue-500 transition-colors uppercase tracking-widest">Terminal</a>
+             <a href="/options" class="text-[10px] font-bold text-gray-500 hover:text-blue-500 transition-colors uppercase tracking-widest">Options</a>
+        </div>
+    </header>
+
+    <main class="flex-1 overflow-y-auto p-4 space-y-4">
+        <!-- Summary Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div class="glass-panel p-4 rounded-2xl stat-card">
+                <div class="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-1">Total PnL</div>
+                <div id="stat-pnl" class="text-xl font-black text-white">0.00</div>
+            </div>
+            <div class="glass-panel p-4 rounded-2xl stat-card">
+                <div class="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-1">Total Trades</div>
+                <div id="stat-trades" class="text-xl font-black text-white">0</div>
+            </div>
+            <div class="glass-panel p-4 rounded-2xl stat-card">
+                <div class="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-1">Win Rate</div>
+                <div id="stat-winrate" class="text-xl font-black text-white">0%</div>
+            </div>
+            <div class="glass-panel p-4 rounded-2xl stat-card border-l-2 border-red-500/50">
+                <div class="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-1 text-red-400">Max Drawdown</div>
+                <div id="stat-dd" class="text-xl font-black text-white">0.00</div>
+            </div>
+            <div class="glass-panel p-4 rounded-2xl stat-card border-l-2 border-blue-500/50">
+                <div class="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-1 text-blue-400">Sharpe Ratio</div>
+                <div id="stat-sharpe" class="text-xl font-black text-white">0.00</div>
+            </div>
+            <div class="glass-panel p-4 rounded-2xl stat-card">
+                <div class="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-1">Avg Profit</div>
+                <div id="stat-avg" class="text-xl font-black text-white">0.00</div>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div class="glass-panel p-5 rounded-3xl h-[400px]">
+                <div class="flex justify-between items-center mb-6">
+                    <div class="text-[10px] font-black text-blue-500 uppercase tracking-widest">Equity Curve</div>
+                    <div class="text-[8px] font-bold text-gray-500 uppercase">Live Performance Tracking</div>
+                </div>
+                <div id="equity-chart" class="w-full h-[300px]"></div>
+            </div>
+            <div class="glass-panel p-5 rounded-3xl h-[400px] flex flex-col">
+                <div class="flex justify-between items-center mb-6">
+                    <div class="text-[10px] font-black text-red-500 uppercase tracking-widest">Symmetry Signals</div>
+                    <div class="text-[8px] font-bold text-gray-500 uppercase">Latest Confluence Alerts</div>
+                </div>
+                <div id="signals-list" class="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
+                    <!-- Signals injected here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Trades Table -->
+        <div class="glass-panel rounded-3xl overflow-hidden shadow-2xl">
+            <div class="p-6 border-b border-white/5 flex justify-between items-center bg-white/5">
+                <h3 class="text-[10px] font-black text-gray-300 uppercase tracking-widest">Execution History</h3>
+                <div class="text-[8px] font-bold text-gray-500 uppercase italic">Last 100 Verified Executions</div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="text-[9px] font-black text-gray-500 uppercase tracking-tighter border-b border-white/5">
+                            <th class="p-4">Timestamp</th>
+                            <th class="p-4">Instrument Group</th>
+                            <th class="p-4">Action</th>
+                            <th class="p-4 text-right">Avg Entry/Exit</th>
+                            <th class="p-4 text-right">Realized PnL</th>
+                            <th class="p-4">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trades-body" class="text-xs font-bold">
+                        <!-- Trades injected here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        async function refreshData() {
+            try {
+                const [tradesResp, signalsResp, statsResp] = await Promise.all([
+                    fetch('/api/symmetry/trades'),
+                    fetch('/api/symmetry/signals'),
+                    fetch('/api/symmetry/stats')
+                ]);
+
+                const trades = await tradesResp.json();
+                const signals = await signalsResp.json();
+                const stats = await statsResp.json();
+
+                updateStats(stats);
+                renderTrades(trades);
+                renderSignals(signals);
+                renderEquityChart(trades);
+
+            } catch (e) {
+                console.error("Failed to refresh data", e);
+            }
+        }
+
+        function updateStats(stats) {
+            document.getElementById('stat-pnl').innerText = stats.total_pnl.toFixed(2);
+            document.getElementById('stat-pnl').className = `text-xl font-black \${stats.total_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`;
+            document.getElementById('stat-trades').innerText = stats.trade_count;
+            document.getElementById('stat-winrate').innerText = stats.win_rate.toFixed(1) + '%';
+            document.getElementById('stat-dd').innerText = stats.max_drawdown.toFixed(2);
+            document.getElementById('stat-sharpe').innerText = stats.sharpe_ratio.toFixed(2);
+            document.getElementById('stat-avg').innerText = stats.avg_pnl.toFixed(2);
+        }
+
+        function renderTrades(trades) {
+            const body = document.getElementById('trades-body');
+            if (!body) return;
+            body.innerHTML = trades.map(t => `
+                <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
+                    <td class="p-4 text-gray-400 font-mono text-[10px]">\${new Date(t.timestamp).toLocaleString()}</td>
+                    <td class="p-4">
+                        <div class="flex flex-col">
+                            <span class="text-white">\${t.index}</span>
+                            <span class="text-[8px] text-gray-500 font-normal uppercase tracking-tighter">\${t.instrument}</span>
+                        </div>
+                    </td>
+                    <td class="p-4">
+                        <span class="px-2 py-1 rounded text-[9px] font-black tracking-widest \${t.side === 'BUY' ? 'bg-green-500/20 text-green-500' : 'bg-yellow-500/20 text-yellow-500'}">
+                            \${t.side}
+                        </span>
+                    </td>
+                    <td class="p-4 font-mono text-right">\${t.price.toFixed(2)}</td>
+                    <td class="p-4 text-right font-black \${t.pnl > 0 ? 'text-green-500' : t.pnl < 0 ? 'text-red-500' : 'text-gray-600'}">\${t.pnl ? t.pnl.toFixed(2) : '-'}</td>
+                    <td class="p-4">
+                         <span class="text-[9px] uppercase tracking-tighter \${t.status === 'CLOSED' ? 'text-gray-500' : 'text-blue-500 animate-pulse'}"">\${t.status}</span>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function renderSignals(signals) {
+            const list = document.getElementById('signals-list');
+            if (!list) return;
+            list.innerHTML = signals.map(s => {
+                const details = s.details || {};
+                const tags = [
+                    details.index_break ? '<span class="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 text-[7px] font-black uppercase">IDX-BRK</span>' : '',
+                    details.ce_break ? '<span class="px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 text-[7px] font-black uppercase">CE-BRK</span>' : '',
+                    details.pe_breakdown ? '<span class="px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 text-[7px] font-black uppercase">PE-BD</span>' : '',
+                    details.oi_panic ? '<span class="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 text-[7px] font-black uppercase tracking-tighter">OI-PANIC</span>' : '',
+                    details.decay_filter ? '<span class="px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400 text-[7px] font-black uppercase">ANTI-THETA</span>' : ''
+                ].join(' ');
+
+                return `
+                <div class="p-4 rounded-2xl border border-white/5 bg-white/5 hover:bg-white/[0.08] transition-all">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <span class="text-[11px] font-black \${s.side === 'BUY_CE' ? 'text-green-500' : 'text-red-500'} uppercase tracking-widest">\${s.side}</span>
+                            <span class="ml-2 text-[9px] text-white font-mono">\${s.index} @ \${s.price.toFixed(2)}</span>
+                        </div>
+                        <span class="text-[8px] text-gray-500 font-mono">\${new Date(s.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                    <div class="flex flex-wrap gap-1.5 mb-2">
+                        \${tags}
+                    </div>
+                    <div class="flex justify-between items-center">
+                         <div class="text-[8px] font-black text-gray-400 uppercase tracking-tighter">Confluence Score</div>
+                         <div class="flex gap-1">
+                             \${Array.from({length: 4}).map((_, i) => \`
+                                 <div class="w-2.5 h-1 rounded-full \${i < s.score ? (s.side === 'BUY_CE' ? 'bg-green-500' : 'bg-red-500') : 'bg-white/10'}"></div>
+                             \`).join('')}
+                         </div>
+                    </div>
+                </div>
+            \`}).join('');
+        }
+
+        function renderEquityChart(trades) {
+            const closedTrades = [...trades].filter(t => t.status === 'CLOSED').reverse();
+            if (closedTrades.length === 0) {
+                 document.getElementById('equity-chart').innerHTML = '<div class="flex items-center justify-center h-full text-gray-500 text-[10px] uppercase font-black italic">Waiting for trade data...</div>';
+                 return;
+            }
+
+            let cumPnl = 0;
+            const data = closedTrades.map(t => {
+                cumPnl += t.pnl;
+                return { x: t.timestamp, y: cumPnl };
+            });
+
+            const trace = {
+                x: data.map(d => d.x),
+                y: data.map(d => d.y),
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: { color: '#3b82f6', width: 3, shape: 'spline' },
+                marker: { size: 6, color: '#3b82f6', line: { color: '#f8fafc', width: 1.5 } },
+                fill: 'tozeroy',
+                fillcolor: 'rgba(59, 130, 246, 0.05)'
+            };
+
+            const layout = {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                margin: { l: 30, r: 10, t: 10, b: 30 },
+                xaxis: {
+                    gridcolor: 'rgba(255,255,255,0.03)',
+                    tickfont: { size: 7, color: '#475569', family: 'monospace' },
+                    showline: false
+                },
+                yaxis: {
+                    gridcolor: 'rgba(255,255,255,0.03)',
+                    tickfont: { size: 7, color: '#475569', family: 'monospace' },
+                    showline: false,
+                    zeroline: true,
+                    zerolinecolor: 'rgba(255,255,255,0.1)'
+                }
+            };
+
+            Plotly.newPlot('equity-chart', [trace], layout, { responsive: true, displayModeBar: false });
+        }
+
+        refreshData();
+        setInterval(refreshData, 5000);
+    </script>
+</body>
+</html>

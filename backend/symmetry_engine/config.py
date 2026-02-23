@@ -3,8 +3,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Upstox Access Token# Upstox Access Token
-ACCESS_TOKEN = 'eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI3NkFGMzUiLCJqdGkiOiI2OTliY2JkODdmODBmOTFjMDgxNWJlYzUiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MTgxNzk0NCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcxODg0MDAwfQ.CvOrpuM3kC6w_qd7U6lXIUSN0yDMmLdZWw2VNN5ie2A'
+# Upstox Access Token
+ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN", "")
 
 
 # Strategy Parameters
@@ -25,7 +25,7 @@ INDICES = {
 }
 
 # Database Config
-DB_PATH = 'trading_engine.db'
+DB_PATH = 'data/trading_engine.db'
 
 # Strategy Specifics
 SWING_WINDOW = 15  # 15 minutes rolling swing

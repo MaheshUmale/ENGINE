@@ -1,265 +1,211 @@
-# ENGINE
-engine for symmetry trades 
-To ensure an AI agent or developer writes this without ambiguity, we need to define the **"Triple-Stream Symmetry & Unwinding"** algorithm. This logic focuses on the shift from a "Wall" (Seller Resistance) to a "Void" (Short Covering) by using the Index as the map and the Options as the truth.
-
----
-
-## The "Symmetry-Panic" Algorithm Specification
-
-### 1. Data Input & Pre-processing
-
-The system must stream three instruments simultaneously on a **1-minute or 3-minute timeframe**:
-
-* **Primary:** Index Spot (e.g., NIFTY).
-* **Secondary A:** ATM Call (CE) – *Update strike every 5 minutes if ATM changes.*
-* **Secondary B:** ATM Put (PE) – *Update strike every 5 minutes if ATM changes.*
-* **Calculated Metrics:** * **Price Velocity:** Rate of change over 3 candles.
-* **Relative Strength ():** (Option % Change) / (Index % Change).
-* **OI Delta:** 1-minute change in Open Interest for ATM/OTM strikes.
-
-
-
----
-
-### 2. Phase I: Structural Identification (The "Reference Level")
-
-Identify "Significant Swings" where a **"Wall"** exists.
-
-* **Requirement:** Index hits a New High (or Low) and pulls back.
-* **Log the Reference:** * `Ref_Price_Index` = High of the first attempt.
-* `Ref_Price_CE` = High of the Call at that exact moment.
-* `Ref_Price_PE` = Low of the Put at that exact moment.
-
-
-
----
-
-### 3. Phase II: The Pullback & Decay Filter
-
-Before the second attempt, monitor for **Absorption**.
-
-* **The "Hope" Phase:** Index pulls back.
-* **The Decay Check:** If the Index returns to `Ref_Price_Index` but the `Current_Price_CE` is **higher** than `Ref_Price_CE`, this is **Bullish Divergence** (Time decay should have made it lower; if it's higher, aggressive buying is occurring).
-
----
-
-### 4. Phase III: The Execution Trigger (The "Unwinding")
-
-Enter ONLY when **Symmetry** and **Panic** align.
-
-#### **Bullish Trigger (Call Buy):**
-
-1. **Index:** Crosses above `Ref_Price_Index`.
-2. **Symmetry (CE):** `Current_Price_CE` crosses above `Ref_Price_CE`.
-3. **Symmetry (PE Breakdown):** `Current_Price_PE` **must** break below its own local support base/low.
-4. **The Panic (OI):** ATM Call OI must be **decreasing** (Sellers unwinding).
-5. **The Floor (OI):** ATM Put OI must be **increasing** (Writers building a floor).
-
-#### **Bearish Trigger (Put Buy):**
-
-1. **Index:** Crosses below `Ref_Price_Index` (Low).
-2. **Symmetry (PE):** `Current_Price_PE` crosses above its `Ref_Price_PE` (High).
-3. **Symmetry (CE Breakdown):** `Current_Price_CE` **must** break below its own local support base/low.
-4. **The Panic (OI):** ATM Put OI must be **decreasing**.
-5. **The Floor (OI):** ATM Call OI must be **increasing**.
-
----
-
-### 5. Phase IV: The "Trap" Guardrails (The "Do-Not-Trade" List)
-
-The AI agent must code these hard-stops:
-
-* **The Absorption Trap:** Index breaks High, but CE is rejected or stays below `Ref_Price_CE`. (**Ignore the trade**).
-* **The Fake Break:** Index breaks High, CE breaks High, but **Call OI is increasing**. (This is a "Wall" being reinforced by sellers).
-* **Asymmetry:** Index breaks High, CE breaks High, but **PE refuses to break its Low**. (Indicates smart money is still hedging).
-
----
-
-### 6. Exit & Risk Management
-
-* **Stop Loss (SL):** Triggered if the **Symmetry breaks** (e.g., Index is high but CE price starts falling back below its base).
-* **Target (TGT):** Exit when the **Opposite Option** stops making new lows and its OI starts falling (Sellers of the opposite side have finished their move).
-
----
-
-### Summary for AI Tool Prompting
-
-Copy and paste this specific instruction to your coding tool:
-
-> "Code a trading bot for [Platform] that monitors the Index, ATM CE, and ATM PE.
-> 1. Identify a 'Reference High' in the Index.
-> 2. On the second approach to this High, verify **Triple-Symmetry**: Index must break High, CE must break its own local High, and PE must break its own local Low simultaneously.
-> 3. Add an **OI Filter**: Only buy Calls if Call OI is dropping (Short Covering) and Put OI is rising.
-> 4. Add a **Decay Filter**: If the Call Price is higher than its previous peak at the same Index level, increase the conviction score.
-> 5. Exit immediately if the PE stops making lower lows while the CE is at a peak."
-> 
-> 
-
-**Since we've nailed down the logic for "Symmetry," would you like me to provide the Python code structure for fetching these three streams (Index, CE, PE) using the Upstox API specifically?**
-
-
-
-
-
-
-
-
-
-
-Here is the comprehensive, step-by-step logic for your **"Triple-Stream Symmetry & Panic"** algorithm. This plan is designed to be handed to an AI agent or a developer to generate clean, robust code for the Upstox API.
-
----
-
-## 1. Data Orchestration (The Inputs)
-
-The algorithm must subscribe to three specific data streams in real-time using **WebSockets** (to get the required Tick-by-Tick data for OI analysis).
-
-* **Stream 1 (Index):** Spot Index (e.g., `NSE_INDEX|Nifty 50`).
-* **Stream 2 (Call Option):** ATM CE (Closest to Index Spot).
-* **Stream 3 (Put Option):** ATM PE (Closest to Index Spot).
-* **Strike Logic:** Use a function to dynamically update CE/PE instrument keys if the Index moves > 25 points.
-
----
-
-## 2. Phase I: Structural Anchoring (The "Wall")
-
-Before looking for a trade, the algorithm identifies a significant level where sellers are currently "defending."
-
-* **Logic:** Detect a **Swing High** (for Longs) or **Swing Low** (for Shorts).
-* **Storage:** * `Ref_High_Index`: The price where the Index faced rejection.
-* `Ref_High_CE`: The highest price reached by the ATM CE at that same moment.
-* `Ref_Low_PE`: The lowest price reached by the ATM PE at that same moment.
-
-
-
----
-
-## 3. Phase II: The Pullback & Relative Strength Filter
-
-The algorithm monitors the pullback to see if the "Big Money" is accumulating or distributing.
-
-* **The Decay Check (Anti-Theta):** Compare the Option price on the pullback vs. its previous peak.
-* **Rule:** If `Current_Index_Price` = `Ref_High_Index` but `Current_CE_Price` > `Ref_High_CE`, the conviction is **High**. (Aggressive buyers are overpowering time decay).
-
----
-
-## 4. Phase III: The "Symmetry-Panic" Trigger
-
-This is the core execution logic. All four conditions **must** be true within a 3-candle window.
-
-### **Bullish Trigger (Call Buy)**
-
-1. **Index:** Price breaks above `Ref_High_Index`.
-2. **CE Symmetry:** ATM Call breaks above `Ref_High_CE`.
-3. **PE Symmetry:** ATM Put breaks below its own local support/base.
-4. **The Panic (OI Delta):** * `Call_OI_Change` must be **Negative** (Sellers are covering/exiting).
-* `Put_OI_Change` must be **Positive** (Sellers are building a floor).
-
-
-
----
-
-## 5. Phase IV: The "Trap" Guardrails
-
-The agent must code these "Kill-Switches" to prevent false breakouts:
-
-| The Signal | The Reality | Action |
-| --- | --- | --- |
-| Index breaks High but CE fails to break its peak. | **Absorption:** Sellers are eating the buy orders. | **VOID TRADE** |
-| Index/CE break High, but Call OI is **Increasing**. | **The Wall:** Sellers are doubling down on their shorts. | **VOID TRADE** |
-| Index breaks High, but PE stays flat/refuses to break Low. | **Asymmetry:** No panic in the opposite camp. | **VOID TRADE** |
-
----
-
-## 6. Risk & Exit Management
-
-* **Stop Loss:** Exit if **Symmetry breaks**. If the Index is at a new high but the CE price drops below the previous 2-minute candle low, exit.
-* **Target:** Use **Trailing Stop Loss** based on the "Opposite Option." If you are in a Call, exit when the **Put (PE)** stops falling and starts making a "Higher High."
-
----
-
-## Summary Prompt for Your AI Coder
-
-> "Write a Python script using the Upstox SDK and WebSockets to monitor `NSE_INDEX|Nifty 50` and its ATM CE/PE.
-> 1. Track a 15-minute rolling 'Swing High' in the Index.
-> 2. On a second attempt at that High, trigger a Buy if: (Index > High) AND (ATM_CE > its peak) AND (ATM_PE < its low).
-> 3. Verify the 'Panic' by ensuring ATM Call OI is decreasing.
-> 4. Use a 'Relative Strength' filter: If CE price is higher than its previous peak while Index is at the same level, increase position size.
-> 5. Exit immediately if the Put price (PE) starts rising while you are in a Call."
-> 
-> 
-
-This video guide provides a practical walkthrough for [fetching ATM and OTM market quote data with Python](https://www.youtube.com/watch?v=n4Tf60OiCPY), which is essential for identifying the specific option contracts needed for your symmetry checks.
-
-**Would you like me to draft the specific Python function for calculating the 'OI Delta' so you can track the seller panic in real-time?**
-
-
-
-
-No, we aren't limited to just W/M patterns. Those patterns are simply the most common way **"Symmetry"** and **"Unwinding"** appear visually.
-
-The core of this strategy is **Structural Conflict.** We can apply this logic to any significant Level of Interest. Here is how we expand the logic to other support and resistance types:
-
----
-
-### 1. The "Base" Breakout (Horizontal S/R)
-
-Instead of a W or M, this is a **tight consolidation range**.
-
-* **The Logic:** If the Index has been stuck in a 20-point range for 30 minutes, a "Volumetric Wall" has been built.
-* **The Check:** When the Index exits the range, the ATM CE and ATM PE must exit their respective ranges **simultaneously**.
-* **The Edge:** If the Index breaks out but the Option is still stuck inside its range, the "Smart Money" is absorbing the move.
-
-### 2. The "False Break" (Liquidity Raid)
-
-This is when the Index breaks a previous swing high, but only for a few seconds.
-
-* **The Logic:** This is often a "Raid" to trigger stop-losses.
-* **The Symmetry Check:** If the Index breaks the high, but the **Option OI increases** and the **Option Price fails to break its own high**, it is a "False Break."
-* **The Play:** You don't buy the breakout; you wait for the "Fade" (the reversal).
-
-### 3. Gap S/R (Opening Range)
-
-The high and low of the first 15 minutes of the day often act as massive structural walls.
-
-* **The Logic:** If the price returns to the Opening Range High (ORH) later in the day.
-* **The Symmetry Check:** At the ORH, is the Call Option showing "Relative Strength" (Price higher than it was at the open, despite 2-3 hours of time decay)?
-* **The Unwinding:** If Call OI starts dropping at the ORH, it means the morning's sellers are giving up.
-
----
-
-### Updated Algorithm: The "Condition Matrix"
-
-Instead of coding for "W" or "M" specifically, tell your AI Agent to code for **"Correlated Breaches."** This makes the code much simpler and more robust.
-
-| Structure Type | Index Action | CE Option Action | PE Option Action | Real Edge (The "Panic") |
-| --- | --- | --- | --- | --- |
-| **Horizontal S/R** | Break above resistance. | Break above local high. | Break below local low. | Call OI drops; Put OI rises. |
-| **Trendline** | Break of descending line. | Break of own trendline. | Support breakdown. | Option price leads the Index move. |
-| **Mean Reversion** | Bounce from 20 EMA. | Higher Low formed. | Lower High formed. | OI stays flat (No new sellers). |
-
----
-
-### Why "Relative Strength" is the Master Filter
-
-Regardless of whether it's a W-pattern, a Trendline, or a Fibonacci level, the **relative strength of the option** is your universal truth:
-
-1. **Leading:** Option breaks the level *before* the Index (High Conviction).
-2. **Lagging:** Index breaks the level but Option is stuck (Low Conviction/Trap).
-3. **Divergence:** Index makes a "Higher High," but Option makes a "Lower High" (Classic reversal signal).
-
-### Next Step for the AI Code:
-
-When you ask the AI to write the code, ask it to create a **"Confluence Score"**:
-
-* +1 point if Index breaks S/R.
-* +1 point if CE/PE breaks their respective S/R.
-* +1 point if Call OI decreases (for Longs).
-* +1 point if Option Price > `Ref_Price` (Anti-decay check).
-
-**A trade is only triggered if the Score is 4/4.**
-
-**Would you like me to show you how to code this "Confluence Score" system in Python?**
-
-
-
+# PRODESK Simplified Terminal
+
+A minimal, high-performance trading terminal featuring TradingView charting, real-time WebSocket data, and candle-by-candle replay.
+
+## Features
+
+- **Minimal UI**: Clean interface with only a search bar and a full-screen chart.
+- **TradingView Charts**: Powered by TradingView Lightweight Charts (v4.1.1) for professional-grade charting with native zoom and pan.
+- **Zoom Controls**: Dedicated (+), (-), and RESET buttons for easy timescale management.
+- **Candle-by-Candle Replay**:
+  - Enter Replay mode to analyze historical price action.
+  - **Select Start**: Click anywhere on the chart to set the starting point for replay.
+  - **Playback**: Use Play/Pause, Next, and Previous buttons to step through candles one by one.
+- **Real-time Data Flow**:
+  - Live quote streaming and indicator plot data via TradingView WebSocket (WSS) protocol.
+  - **Indicator Integration**: Directly pulls plot data from Pine Script studies (Bubbles, S/R Dots, Pivot Lines, etc.).
+  - **Room-based Broadcasting**: Uses Socket.IO rooms named after symbol HRNs to ensure efficient, targeted data delivery.
+- **Multi-Chart Layouts**:
+  - Toggle between **1, 2, or 4-chart** grids using the layout selector.
+  - Each chart instance operates independently with its own symbol, interval, and indicator state.
+  - Automatic grid resizing for optimal screen utilization.
+- **Layout Persistence**:
+  - Automatically saves your layout, symbols, intervals, and drawing tools to `localStorage`.
+  - Restores your previous setup instantly on refresh.
+- **URL Parameters**:
+  - Open a specific symbol and interval directly via the URL (e.g., `?symbol=NSE:RELIANCE&interval=5`).
+  - This mode automatically sets the layout to 1 chart.
+- **Maximize Chart**:
+  - Use the **MAXIMIZE** button to open the currently active chart in a new browser tab for focused, full-screen analysis.
+- **Advanced Visualization**:
+  - **Markers & Shapes**: Dynamic rendering of volume bubbles and S/R dots using Lightweight Charts markers.
+  - **Bar Coloring**: Real-time candle color updates based on study-provided volume and trend metrics, with a built-in RVOL (Relative Volume) fallback for consistent trend analysis.
+  - **Background Shading**: Highlighting of specific market conditions (e.g., breakout zones) via background colors.
+  - **Smart Scaling**: Automatic Y-axis management to prevent low-value oscillators from compressing the price action.
+- **Enhanced Search & Discovery**:
+  - **Unified Search**: Search for indices (NIFTY, BANKNIFTY) or stocks (RELIANCE) and get instant results.
+  - **Options Discovery**: Automatically merges results from the TradingView Options Scanner.
+  - **Technical Search**: Search using exact technical strings (e.g., `NIFTY260210C25600`) for precise contract selection.
+- **Confluence Visuals**:
+  - **OI Profile Overlay**: Toggleable vertical histogram directly on the chart showing Call vs Put Open Interest across all strikes.
+  - **Analysis Center Sidebar**: Integrated panel showing OiGenie predictions (institutional control), OI Buildup Pulse, and real-time Scalper metrics.
+  - **Synchronized Replay**: Historical replay mode now fully synchronizes with historical OI and PCR data, simulating the exact market state for strategy refinement.
+- **Triple-Stream Symmetry & Panic Strategy**:
+  - Implements the "Wall-to-Void" algorithm for index scalping.
+  - **Symmetry Detection**: Synchronizes Index Spot, ATM Call, and ATM Put price action.
+  - **Panic Filter**: Real-time OI Delta tracking to detect seller unwinding (short covering).
+  - **Decay Divergence**: Detects bullish momentum by identifying option prices that resist theta decay.
+  - **Automated Visualization**: Direct marking of BUY_CE/BUY_PE signals on the chart with dynamic SL and TP price lines.
+- **Efficient Backend**: Built with FastAPI and DuckDB for low-latency data handling and persistence.
+- **Enhanced Data Engine**: Integrated enterprise-grade TradingView module featuring:
+  - **Intelligent Caching**: Multi-layered cache for historical and real-time data.
+  - **Connection Monitoring**: Real-time tracking of latency, stability, and protocol health.
+  - **Fault Recovery**: Automatic data source failover and exponential backoff reconnection.
+  - **Data Quality Engine**: Automated validation of OHLC logic and sequence continuity.
+- **DuckDB Viewer**: A dedicated SQL-based viewer at `/db-viewer` that shares the application's database connection, allowing real-time table inspection and custom queries without file-locking issues.
+- **Options Analysis Dashboard**:
+  - A specialized dashboard at `/options` for deep-dive options analysis.
+  - **Analysis Overview**: A unified cockpit merging Spot-PCR Confluence, OI Distribution, and Merged OI Trends (Total vs Chg) into a single view.
+  - **Real-time Option Chain**: Live streaming of LTP, Greeks (Delta, Theta, IV), and OI metrics.
+  - **Institutional Control**: OiGenie Market Control pulse and institutional range detection.
+  - **OI Buildup Pulse**: Real-time census of Long/Short buildup and covering across all strikes.
+  - **NSE Confluence Scalper**: Automated option buying engine using price action and OI confluence.
+  - **System Monitoring**: Dedicated "System" tab for real-time tracking of the TradingView engine's health score, cache hits, and request latency.
+  - **Automated Data Management**: Background backfilling and periodic snapshots (every 5 minutes).
+- **Specialized Tick-Based Charts**:
+  - **Tick Chart**: A dedicated chart at `/tick` that aggregates raw ticks into OHLC candles based on a customizable "ticks per candle" setting.
+  - **Renko Chart**: A price-movement-based chart at `/renko` that forms "bricks" based on a customizable box size, filtering out noise.
+  - **IST Timestamps**: All tick-based charts are standardized to Indian Standard Time (IST) for accurate market tracking.
+  - **Tick/Renko Replay**: Full replay support for both specialized charts, allowing historical tick-by-tick analysis.
+
+## Architecture
+
+- **Frontend**: SPA built with Tailwind CSS. Utilizes `lightweight-charts` for rendering and `Chart.js` for options analysis.
+- **Backend**:
+  - **Interface-Based Data Layer**: Decoupled ingestion layer using `ILiveStreamProvider`, `IOptionsDataProvider`, and `IHistoricalDataProvider` for multi-source redundancy.
+  - `FastAPI`: Serves the UI and provides high-performance REST endpoints.
+  - `Data Engine`: The central hub for processing raw ticks and routing updates.
+  - `Confluence Engine`: A sophisticated signal generator in `brain/` utilizing `scipy` for technical level discovery.
+  - `DuckDB`: Optimized columnar store for high-frequency tick and options history.
+
+## Setup & Running
+
+### Prerequisites
+
+- Python 3.10+
+- Dependencies listed in `requirements.txt`
+
+### Installation
+
+1. Install required packages:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+### Configuration
+
+Set TradingView credentials or session cookies in `config.py` (or via environment variables) to access private indicators and higher-granularity data.
+
+### Running the Server
+
+Start the application from the project root:
+
+```bash
+python3 backend/api_server.py
+```
+
+- **Main Terminal**: `http://localhost:3000/`
+- **Options Dashboard**: `http://localhost:3000/options`
+- **Tick Chart**: `http://localhost:3000/tick`
+- **Renko Chart**: `http://localhost:3000/renko`
+- **DB Viewer**: `http://localhost:3000/db-viewer`
+
+## User Guide
+
+### 1. Multi-Chart Layouts
+- **Switching Layouts**: Use the grid icons in the header to toggle between **1, 2, or 4 charts**.
+- **Active Chart**: Click anywhere on a chart to make it "Active". The active chart is highlighted with a blue border.
+- **Independent Controls**: Symbol search, timeframe selection, and indicator toggles apply only to the **currently active chart**. This allows you to monitor different symbols or timeframes side-by-side.
+
+### 2. Symbol Search & Options
+- **Discovery**: Type a symbol (e.g., `RELIANCE`) or index (e.g., `NIFTY`) in the search bar.
+- **Options Discovery**: Searching for an index automatically fetches and displays associated option contracts from the TradingView Options Scanner.
+- **Technical Symbols**: You can enter exact technical strings like `NSE:NIFTY260210C25600` for direct access to specific contracts.
+
+### 3. Drawing Tools (HLINE)
+- **Activation**: Click the **HLINE** button in the header (it will turn blue).
+- **Placement**: Click anywhere on the active chart to place a horizontal price line.
+- **Quick Shortcut**: Hold **Shift + Click** on the chart to place a horizontal line at any time, even if the HLINE tool is not toggled on.
+- **Management**: Drawings are saved automatically and can be removed via the **Indicators** panel.
+
+### 4. Indicator Management
+- **Global Toggle**: Use **HIDE ALL / SHOW ALL** to quickly clear the chart of all indicator plots and markers.
+- **Individual Control**: Click **INDICATORS** to open the management panel. From here, you can:
+  - Toggle the visibility of specific indicator series (lines, areas, histograms).
+  - **Customize Colors**: Change the color of any indicator or marker type (e.g., TRAPS) using the built-in color picker.
+  - Toggles for markers and signals.
+  - Remove individual drawings like horizontal lines.
+
+### 5. Candle Replay
+- **Enter Mode**: Click the **REPLAY** button.
+- **Data Sync**: Upon entering Replay, the terminal fetches full historical options data for the day.
+- **Select Start**: Click on any historical candle to set the starting point.
+- **Controls**: Use **Play/Pause**, **Next**, and **Previous** to step through the price action.
+- **Simulated Confluence**: As you step through candles, the **OI Profile** and **Analysis Sidebar** automatically update to show the nearest available historical OI/PCR/Scalper data for that specific point in time.
+- **Exit**: Click **EXIT** to return to the real-time feed.
+
+### 6. Specialized Charts (Tick & Renko)
+- **Tick Chart (`/tick`)**:
+  - Visualizes market data as candles formed by a fixed number of ticks (e.g., 50, 100).
+  - Use the **Ticks** input in the header to adjust aggregation on the fly.
+  - Supports full **Replay** of historical ticks stored in the database.
+- **Renko Chart (`/renko`)**:
+  - Aggregates price movement into "bricks" of a fixed **Box Size**.
+  - Ideal for identifying trends and filtering out minor price fluctuations.
+  - Like the tick chart, it supports **Replay** for back-testing and analysis.
+- **Timestamps**: Both charts display timestamps in **IST** (Asia/Kolkata) for consistency with Indian market hours.
+
+### 7. Confluence Tools
+- **OI Profile**: Toggle this in the header to see the option chain distribution overlaid on your price chart. Red bars represent Call OI (resistance), and green bars represent Put OI (support).
+- **Analysis Sidebar**: Toggle this to view a high-level summary of:
+  - **OiGenie**: Detects whether buyers or sellers are in control and predicts potential sideways movement.
+  - **OI Buildup Pulse**: Real-time census of Long/Short buildup and covering across all strikes.
+  - **Scalper Pulse**: If the NSE Confluence Scalper is running, its live metrics and confluence dots will appear here.
+- **Symmetry & Panic Pulse**: A dedicated real-time tracker for the Symmetry strategy, showing the active signal type, confluence score, and live PnL relative to the entry price.
+
+### 8. Triple-Stream Symmetry Strategy
+The terminal includes a native implementation of the Triple-Stream Symmetry & Panic strategy (inspired by MaheshUmale/ENGINE):
+- **Phase I (Reference Level)**: Detects significant swing highs/lows ("Walls") in the index and records the corresponding option prices.
+- **Phase II (Pullback)**: Monitors the index return to the reference level.
+- **Phase III (The Trigger)**: Executes when the Index, ATM Call, and ATM Put reach a state of symmetry (e.g., Index > High, CE > High, PE < Low) combined with OI panic.
+- **Phase IV (Guardrails)**: Built-in absorption traps and asymmetry filters to prevent false breakouts.
+
+To view Symmetry signals:
+1. Select an Index symbol (e.g., `NSE:NIFTY`).
+2. Ensure the timeframe is set to `1M`.
+3. Check the **Analysis** toggle in the header.
+4. Signals will appear as markers on the chart. SL and TP levels will be drawn as horizontal dashed lines.
+
+### 9. Strategy Backtesting
+You can evaluate the Symmetry strategy using the provided backtest utility:
+```bash
+export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
+python backend/backtest_symmetry.py
+```
+This script simulates the strategy over historical DuckDB data and provides a detailed performance report including:
+- Win Rate %
+- Total Cumulative PnL %
+- Individual Trade Logs (Entry, Exit, Outcome, PnL)
+
+### 10. Settings & Customization
+- **Theme Management**: Use the **Moon/Sun** icon in the header to toggle between **Modern Dark Mode** and **High-Visibility Light Theme**.
+- **Theming Logic**: The application uses a unified CSS variable engine (`--bg-main`, `--text-primary`, etc.) ensuring consistent colors across all charts, tables, and dashboards.
+- **Typography**: Optimized for readability using the **Plus Jakarta Sans** font family, with distinct weights for data (600) and headers (800).
+- **Layout Persistence**: Your layout configuration, selected symbols, timeframes, and drawings are automatically saved to `localStorage`. They will be restored exactly as you left them when you return to the application.
+
+### 11. Changing Features & Config
+- **Market Hours**: Most analysis tools default to Indian Standard Time (IST). Ensure your system clock is accurate for optimal real-time synchronization.
+- **Data Intervals**: Toggle between 1M, 5M, 15M, and 1H intervals in the terminal header. Note that Options Snapshot data defaults to a 5-minute granularity.
+- **DB Inspection**: Use the `/db-viewer` to run raw SQL queries if you need to extract custom datasets or verify snapshot integrity.
+
+### 12. Advanced Configuration (backend/config.py)
+Advanced users can tune the system by modifying `backend/config.py`:
+- **Greeks Config**: Adjust the `risk_free_rate` (default 10%) or `default_volatility` for Black-Scholes calculations.
+- **IV Thresholds**: Change `high_iv_threshold` (default 70) and `low_iv_threshold` (30) to customize IV Rank signals.
+- **Snapshot Timing**: Modify `SNAPSHOT_CONFIG` to change the frequency of data collection (default is 180 seconds).
+- **Symbol List**: Update `OPTIONS_UNDERLYINGS` to track additional indices or stocks in the Options Dashboard.
+
+## Development & Customization
+
+- **Indicator Mapping**: Indicator plots are mapped in `backend/static/app.js` using the `indicatorSeries` registry. Titles containing "Bubble", "Dot", or "TF" are automatically converted to chart markers.
+- **Symbol Normalization**: Symbols are standardized using `backend/core/symbol_mapper.py` to ensure consistency between technical keys (e.g., `NSE:NIFTY`) and human-readable names (`NIFTY`).

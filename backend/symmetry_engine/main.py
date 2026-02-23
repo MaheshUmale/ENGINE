@@ -10,7 +10,7 @@ from .config import INDICES, ACCESS_TOKEN, SWING_WINDOW, ENABLE_INDEX_SYNC
 from .database import init_db, get_session, RawTick, Candle
 
 class TradingBot:
-    def __init__(self):
+    def __init__(self, loop=None):
         self.data_provider = DataProvider(ACCESS_TOKEN)
         self.engines = {name: StrategyEngine(name) for name in INDICES}
         self.execution = ExecutionEngine()
@@ -21,24 +21,21 @@ class TradingBot:
         self.candle_buffers_5m = {} # instrument -> current_candle
         self.tick_batch = []
         self.last_batch_save = datetime.datetime.now()
+        self.loop = loop or asyncio.get_event_loop()
 
-    async def handle_tick(self, message):
-        if not isinstance(message, dict):
+    def handle_tick_sync(self, feeds):
+        """Bridge for data_engine internal callbacks."""
+        if self.loop and self.loop.is_running():
+            asyncio.run_coroutine_threadsafe(self.handle_tick(feeds), self.loop)
+
+    async def handle_tick(self, feeds):
+        if not isinstance(feeds, dict):
             return
 
-        feeds = message.get('feeds', {})
         for key, data in feeds.items():
-            full_feed = data.get('fullFeed', {})
-            ltp, oi, vtt = None, None, None
-
-            if 'indexFF' in full_feed:
-                ltp = full_feed['indexFF'].get('ltpc', {}).get('ltp')
-            elif 'marketFF' in full_feed:
-                mff = full_feed['marketFF']
-                ltp = mff.get('ltpc', {}).get('ltp')
-                oi = mff.get('oi')
-                vtt = mff.get('vtt')
-                if vtt: vtt = float(vtt) # vtt is string in V3
+            ltp = data.get('last_price')
+            oi = data.get('oi')
+            vtt = data.get('upstox_volume') or data.get('tv_volume') or data.get('ltq', 0)
 
             if ltp is None: continue
 
@@ -75,40 +72,43 @@ class TradingBot:
             if key == instruments['index']:
                 candle_df = pd.DataFrame([buffer])
 
-                # Use a single session for all operations
-                session = get_session()
-                try:
-                    # Phase I: Identify Swing
-                    last_candles = session.query(Candle).filter_by(instrument_key=key).order_by(Candle.timestamp.desc()).limit(20).all()
+                # Use a background thread for non-critical DB operations
+                def db_ops():
+                    session = get_session()
+                    try:
+                        # Phase I: Identify Swing
+                        last_candles = session.query(Candle).filter_by(instrument_key=key).order_by(Candle.timestamp.desc()).limit(20).all()
 
-                    if last_candles:
-                        df = pd.DataFrame([c.__dict__ for c in last_candles])
-                        df = pd.concat([df, candle_df], ignore_index=True)
-                        swing = engine.identify_swing(df)
-                        if swing:
-                            # Fetch current option prices for reference
-                            ce_data = engine.current_data.get(instruments['ce'], {})
-                            pe_data = engine.current_data.get(instruments['pe'], {})
-                            engine.save_reference_level(
-                                swing['type'],
-                                price,
-                                ce_data.get('ltp', 0),
-                                pe_data.get('ltp', 0),
-                                instruments['ce'],
-                                instruments['pe']
-                            )
+                        if last_candles:
+                            df = pd.DataFrame([c.__dict__ for c in last_candles])
+                            df = pd.concat([df, candle_df], ignore_index=True)
+                            swing = engine.identify_swing(df)
+                            if swing:
+                                # Fetch current option prices for reference
+                                ce_data = engine.current_data.get(instruments['ce'], {})
+                                pe_data = engine.current_data.get(instruments['pe'], {})
+                                engine.save_reference_level(
+                                    swing['type'],
+                                    price,
+                                    ce_data.get('ltp', 0),
+                                    pe_data.get('ltp', 0),
+                                    instruments['ce'],
+                                    instruments['pe']
+                                )
 
-                    # Save Candle to DB
-                    db_candle = Candle(instrument_key=key, interval=1, timestamp=buffer['timestamp'],
-                                       open=buffer['open'], high=buffer['high'], low=buffer['low'],
-                                       close=buffer['close'], volume=buffer['volume'])
-                    session.add(db_candle)
-                    session.commit()
-                except Exception as e:
-                    print(f"Error in aggregate_and_process DB ops: {e}")
-                    session.rollback()
-                finally:
-                    session.close()
+                        # Save Candle to DB
+                        db_candle = Candle(instrument_key=key, interval=1, timestamp=buffer['timestamp'],
+                                           open=buffer['open'], high=buffer['high'], low=buffer['low'],
+                                           close=buffer['close'], volume=buffer['volume'])
+                        session.add(db_candle)
+                        session.commit()
+                    except Exception as e:
+                        print(f"Error in aggregate_and_process DB ops: {e}")
+                        session.rollback()
+                    finally:
+                        session.close()
+
+                asyncio.create_task(asyncio.to_thread(db_ops))
 
             # 5-minute aggregation
             if buffer_key not in self.candle_buffers_5m:
@@ -186,15 +186,20 @@ class TradingBot:
 
     async def save_tick_batch(self):
         if not self.tick_batch: return
-        try:
-            session = get_session()
-            session.add_all(self.tick_batch)
-            session.commit()
-            session.close()
-            self.tick_batch = []
-            self.last_batch_save = datetime.datetime.now()
-        except Exception as e:
-            print(f"Error saving tick batch: {e}")
+        batch = self.tick_batch.copy()
+        self.tick_batch = []
+        self.last_batch_save = datetime.datetime.now()
+
+        def do_save():
+            try:
+                session = get_session()
+                session.add_all(batch)
+                session.commit()
+                session.close()
+            except Exception as e:
+                print(f"Error saving tick batch: {e}")
+
+        asyncio.create_task(asyncio.to_thread(do_save))
 
     async def monitor_index(self, index_name):
         print(f"Starting monitor for {index_name}")
@@ -235,9 +240,9 @@ class TradingBot:
             if not details: continue
 
             # Fetch last 2 days of data for Index, CE, PE
-            idx_hist = self.data_provider.get_historical_data(details['index'], interval=1)
-            ce_hist = self.data_provider.get_historical_data(details['ce'], interval=1)
-            pe_hist = self.data_provider.get_historical_data(details['pe'], interval=1)
+            idx_hist = await self.data_provider.get_historical_data(details['index'], interval=1)
+            ce_hist = await self.data_provider.get_historical_data(details['ce'], interval=1)
+            pe_hist = await self.data_provider.get_historical_data(details['pe'], interval=1)
 
             if idx_hist is not None and not idx_hist.empty:
                 print(f"Ingesting historical candles for {name} warm-up")

@@ -77,19 +77,27 @@ class StrategyEngine:
     def identify_swing(self, candles):
         """
         Identify Significant Swings where a 'Wall' exists.
-        Advanced: Hits a New High/Low and confirms with 2-candle pullback.
+        Enhanced: Hits a New High/Low and confirms with 2-candle pullback + ATR filter.
         """
-        if len(candles) < 5:
+        if len(candles) < 10:
             return None
+
+        # Calculate ATR for threshold (optional but recommended)
+        atr = self.calculate_atr(candles.iloc[0].get('instrument_key', ''))
+        atr_threshold = atr * 0.5 if atr > 0 else 0
 
         # Simple swing detection: local high/low in the window
         last_n = candles.tail(SWING_WINDOW)
         current_high = last_n['high'].max()
         current_low = last_n['low'].min()
 
+        # Check if the move into the high/low was significant relative to ATR
+        window_start_price = last_n.iloc[0]['close']
+        if abs(current_high - window_start_price) < atr_threshold and abs(current_low - window_start_price) < atr_threshold:
+            return None
+
         # Confirmation logic:
         # High formed: Extreme High at candle i-2, then candle i-1 and i have lower highs
-        # Low formed: Extreme Low at candle i-2, then candle i-1 and i have higher lows
         c = candles.iloc[-1]
         p = candles.iloc[-2]
         pp = candles.iloc[-3]
@@ -166,7 +174,8 @@ class StrategyEngine:
             details['pe_oi_delta'] = float(pe_data.get('oi_delta', 0))
 
             if ce_data.get('oi_delta', 0) < 0 and pe_data.get('oi_delta', 0) > 0:
-                score += 1
+                # Weighted Score: OI Panic is a high-conviction signal
+                score += 2
                 details['oi_panic'] = True
 
             # Calculate and log metrics
@@ -219,7 +228,8 @@ class StrategyEngine:
             details['pe_oi_delta'] = float(pe_data.get('oi_delta', 0))
 
             if pe_data.get('oi_delta', 0) < 0 and ce_data.get('oi_delta', 0) > 0:
-                score += 1
+                # Weighted Score
+                score += 2
                 details['oi_panic'] = True
 
             # Metrics
@@ -272,6 +282,13 @@ class StrategyEngine:
                 # Check SL hit
                 if active_opt_data['ltp'] < self.trailing_sl[self.index_name]:
                     return True
+
+                # Profit-Locked Aggressive Trailing
+                # If profit > 3x ATR, lock in at least 1x ATR profit
+                if active_opt_data['ltp'] > entry_price + (3 * atr):
+                    locked_sl = entry_price + (1 * atr)
+                    if locked_sl > self.trailing_sl[self.index_name]:
+                        self.trailing_sl[self.index_name] = locked_sl
 
         # 2. Strategy Exits
         # Exit if Opposite Option OI starts falling (sellers finished)
