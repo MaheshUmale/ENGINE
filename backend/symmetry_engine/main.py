@@ -8,7 +8,6 @@ from .risk_manager import RiskManager
 from .alerts import AlertManager
 from .config import INDICES, ACCESS_TOKEN, SWING_WINDOW, ENABLE_INDEX_SYNC
 from .database import init_db, get_session, RawTick, Candle
-from .utils import get_now_utc
 
 class TradingBot:
     def __init__(self, loop=None):
@@ -42,7 +41,7 @@ class TradingBot:
 
             # Batch raw tick for better performance
             self.tick_batch.append(RawTick(instrument_key=key, ltp=ltp, volume=vtt, oi=oi))
-            if len(self.tick_batch) >= 100 or (get_now_utc() - self.last_batch_save).total_seconds() > 5:
+            if len(self.tick_batch) >= 100 or (datetime.datetime.now() - self.last_batch_save).seconds > 5:
                 await self.save_tick_batch()
 
             # Update engine with latest tick data
@@ -58,19 +57,15 @@ class TradingBot:
         engine = self.engines[index_name]
         instruments = self.instruments[index_name]
 
-        # Aggregation stays in IST for candle logic if desired,
-        # but for DB storage we use UTC.
-        # Actually, let's keep minute in IST for logic, then convert to UTC for DB.
-        from .utils import get_now_ist, ist_to_utc_naive
-        now_ist = get_now_ist()
-        minute_ist = now_ist.replace(second=0, microsecond=0)
+        now = datetime.datetime.now()
+        minute = now.replace(second=0, microsecond=0)
 
         buffer_key = f"{index_name}_{key}"
         if buffer_key not in self.candle_buffers:
-            self.candle_buffers[buffer_key] = {'timestamp': minute_ist, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
+            self.candle_buffers[buffer_key] = {'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
 
         buffer = self.candle_buffers[buffer_key]
-        if minute_ist > buffer['timestamp']:
+        if minute > buffer['timestamp']:
             # Candle closed
             engine.update_candle(key, buffer.copy())
 
@@ -118,10 +113,10 @@ class TradingBot:
             # 5-minute aggregation
             if buffer_key not in self.candle_buffers_5m:
                 self.candle_buffers_5m[buffer_key] = buffer.copy()
-                self.candle_buffers_5m[buffer_key]['timestamp'] = minute_ist.replace(minute=minute_ist.minute - (minute_ist.minute % 5))
+                self.candle_buffers_5m[buffer_key]['timestamp'] = minute.replace(minute=minute.minute - (minute.minute % 5))
 
             buf5 = self.candle_buffers_5m[buffer_key]
-            if (minute_ist.minute % 5 == 0) and minute_ist > buf5['timestamp']:
+            if (minute.minute % 5 == 0) and minute > buf5['timestamp']:
                 # 5m candle closed
                 engine.update_candle(key, buf5.copy(), interval=5)
                 self.candle_buffers_5m[buffer_key] = buffer.copy()
@@ -132,7 +127,7 @@ class TradingBot:
                 buf5['volume'] += buffer['volume']
 
             # Reset buffer
-            self.candle_buffers[buffer_key] = {'timestamp': minute_ist, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
+            self.candle_buffers[buffer_key] = {'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
         else:
             # Update buffer
             buffer['high'] = max(buffer['high'], price)
@@ -143,7 +138,7 @@ class TradingBot:
         # Run strategy signals on every tick if reference levels exist
         signal = engine.generate_signals(instruments)
         if signal:
-            signal.timestamp = get_now_utc()
+            signal.timestamp = datetime.datetime.utcnow()
             # Enhancement: Multi-Index Sync Check
             if ENABLE_INDEX_SYNC:
                 other_sync = True
