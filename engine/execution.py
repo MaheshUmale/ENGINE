@@ -29,8 +29,9 @@ class ExecutionEngine:
         self.balance -= entry_cost
 
         session = get_session()
+        ts = timestamp if timestamp else (signal.timestamp if signal.timestamp else datetime.datetime.utcnow())
         trade = Trade(
-            timestamp=timestamp if timestamp else signal.timestamp,
+            timestamp=ts,
             index_name=signal.index_name,
             instrument_key=signal.side, # Simplified for paper trading
             side='BUY',
