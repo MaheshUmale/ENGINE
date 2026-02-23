@@ -120,5 +120,5 @@ async def toggle_alerts(enabled: str = Form(...)):
     return RedirectResponse(url="/", status_code=303)
 
 def run_dashboard():
-    import uvicorn
+    
     uvicorn.run(app, host="0.0.0.0", port=8000)

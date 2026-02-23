@@ -8,6 +8,10 @@ def start_dashboard():
     from engine.dashboard import run_dashboard
     run_dashboard()
 
+
+
+def start_dashboard():
+    run_dashboard()
 async def main():
     parser = argparse.ArgumentParser(description='Triple-Stream Symmetry & Unwinding Trading Engine')
     parser.add_argument('--mode', choices=['live', 'backtest', 'dashboard', 'full'], default='live', help='Run mode')
@@ -60,14 +64,10 @@ async def main():
 
 if __name__ == "__main__":
     import sys
-    # Special handling for dashboard mode to avoid nested asyncio loops
-    if "dashboard" in sys.argv:
-        from engine.database import init_db
-        init_db()
-        from engine.dashboard import run_dashboard
-        run_dashboard()
-    else:
-        try:
-            asyncio.run(main())
-        except KeyboardInterrupt:
-            pass
+     # Special handling for dashboard mode to avoid nested asyncio loops
+    
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
+
