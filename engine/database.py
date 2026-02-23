@@ -3,13 +3,14 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 import datetime
 from .config import DB_PATH
+from .utils import get_now_utc
 
 Base = declarative_base()
 
 class RawTick(Base):
     __tablename__ = 'raw_ticks'
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime, default=get_now_utc)
     instrument_key = Column(String)
     ltp = Column(Float)
     volume = Column(Float)
@@ -66,7 +67,7 @@ class Trade(Base):
 class Notification(Base):
     __tablename__ = 'notifications'
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime, default=get_now_utc)
     message = Column(String)
     is_read = Column(Boolean, default=False)
 

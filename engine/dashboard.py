@@ -8,6 +8,7 @@ import json
 import plotly.graph_objects as go
 from .config import DB_PATH
 from .database import get_session, AppSetting, Notification
+from .utils import format_timestamp, to_ist
 
 app = FastAPI(title="Symmetry Engine Dashboard")
 # Templates are in the root templates directory
@@ -29,6 +30,12 @@ async def home(request: Request):
         trades_display = pd.read_sql("SELECT * FROM trades ORDER BY timestamp DESC LIMIT 50", conn)
         signals = pd.read_sql("SELECT * FROM signals ORDER BY timestamp DESC LIMIT 50", conn)
 
+        # Apply IST formatting to display data
+        if not trades_display.empty:
+            trades_display['timestamp'] = trades_display['timestamp'].apply(format_timestamp)
+        if not signals.empty:
+            signals['timestamp'] = signals['timestamp'].apply(format_timestamp)
+
         # Fetch data for summary calculations (full history of closed trades)
         all_closed_trades = pd.read_sql("SELECT pnl, timestamp FROM trades WHERE side = 'SELL' AND status = 'CLOSED' ORDER BY timestamp", conn)
 
@@ -45,8 +52,11 @@ async def home(request: Request):
 
         if not all_closed_trades.empty:
             all_closed_trades['cum_pnl'] = all_closed_trades['pnl'].cumsum()
+            # Convert chart timestamps to IST
+            chart_ts = all_closed_trades['timestamp'].apply(lambda x: to_ist(x).strftime('%H:%M'))
+
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=all_closed_trades['timestamp'], y=all_closed_trades['cum_pnl'], mode='lines', name='Equity Curve'))
+            fig.add_trace(go.Scatter(x=chart_ts, y=all_closed_trades['cum_pnl'], mode='lines', name='Equity Curve'))
             fig.update_layout(title="Equity Curve", xaxis_title="Time", yaxis_title="Net PnL", height=400, margin=dict(l=20, r=20, t=40, b=20))
             equity_json = fig.to_json()
 
@@ -71,7 +81,7 @@ async def home(request: Request):
     session = get_session()
     try:
         notifs = session.query(Notification).order_by(Notification.timestamp.desc()).limit(20).all()
-        notifications = [{"message": n.message, "timestamp": n.timestamp} for n in notifs]
+        notifications = [{"message": n.message, "timestamp": format_timestamp(n.timestamp)} for n in notifs]
 
         setting = session.query(AppSetting).filter_by(key='ENABLE_ALERTS').first()
         if setting:
