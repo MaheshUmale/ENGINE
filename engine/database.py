@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, ForeignKey, JSON
+from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 import datetime
@@ -62,6 +62,18 @@ class Trade(Base):
     quantity = Column(Integer)
     status = Column(String)  # 'OPEN', 'CLOSED'
     pnl = Column(Float, default=0.0)
+
+class Notification(Base):
+    __tablename__ = 'notifications'
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    message = Column(String)
+    is_read = Column(Boolean, default=False)
+
+class AppSetting(Base):
+    __tablename__ = 'settings'
+    key = Column(String, primary_key=True)
+    value = Column(String)
 
 engine = create_engine(f'sqlite:///{DB_PATH}')
 Session = sessionmaker(bind=engine)

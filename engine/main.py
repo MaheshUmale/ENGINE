@@ -138,6 +138,7 @@ class TradingBot:
         # Run strategy signals on every tick if reference levels exist
         signal = engine.generate_signals(instruments)
         if signal:
+            signal.timestamp = datetime.datetime.utcnow()
             # Enhancement: Multi-Index Sync Check
             if ENABLE_INDEX_SYNC:
                 other_sync = True
