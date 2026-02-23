@@ -53,6 +53,9 @@ A minimal, high-performance trading terminal featuring TradingView charting, rea
   - **Fault Recovery**: Automatic data source failover and exponential backoff reconnection.
   - **Data Quality Engine**: Automated validation of OHLC logic and sequence continuity.
 - **DuckDB Viewer**: A dedicated SQL-based viewer at `/db-viewer` that shares the application's database connection, allowing real-time table inspection and custom queries without file-locking issues.
+- **Project Documentation**:
+  - `CONSOLIDATED_REQUIREMENTS.md`: Central source of truth for features and implementation status.
+  - `TODO.md`: Roadmap for future upgrades and maintenance.
 - **Options Analysis Dashboard**:
   - A specialized dashboard at `/options` for deep-dive options analysis.
   - **Analysis Overview**: A unified cockpit merging Spot-PCR Confluence, OI Distribution, and Merged OI Trends (Total vs Chg) into a single view.
