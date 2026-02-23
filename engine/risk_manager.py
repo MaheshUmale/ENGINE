@@ -1,7 +1,7 @@
 import datetime
 
 class RiskManager:
-    def __init__(self, max_daily_loss=50000, max_positions=2):
+    def __init__(self, max_daily_loss=50000, max_positions=4):
         self.max_daily_loss = max_daily_loss
         self.max_positions = max_positions
         self.daily_pnl = 0

@@ -69,6 +69,32 @@ python3 run.py --mode dashboard
 ```
 Then visit `http://localhost:8000`.
 
+### 4. Running Live Bot with Dashboard (Simultaneously)
+
+To run the bot in live mode and monitor it via the dashboard at the same time, you should start them in separate terminal windows or as background processes.
+
+#### Option A: Separate Terminals (Recommended)
+1. **Terminal 1**: Start the Live Bot
+   ```bash
+   python3 run.py --mode live
+   ```
+2. **Terminal 2**: Start the Dashboard
+   ```bash
+   python3 run.py --mode dashboard
+   ```
+
+#### Option B: Background Execution (Linux/Mac)
+You can launch both from a single terminal:
+```bash
+python3 run.py --mode dashboard & python3 run.py --mode live
+```
+
+#### Option C: All-in-One Full Mode (Recommended)
+The project includes a built-in `full` mode that handles starting both processes for you:
+```bash
+python3 run.py --mode full
+```
+
 ## Strategy Overview
 
 The engine monitors three streams simultaneously:
