@@ -51,7 +51,7 @@ This document centralizes all requirements for the ProDesk Trading Terminal, syn
 ---
 
 ## 7. Remaining Items & Upgrades [TODO]
-- [ ] **Paper Trading Persistence**: Ensure paper trades survive server restarts (currently in memory/local DB but needs robust state recovery).
+- [x] **Paper Trading Persistence**: Ensure paper trades survive server restarts (Implemented via `recover_state` in bot engine).
 - [ ] **ML-Based IV Prediction**: Integrate a light LSTM model for short-term IV volatility forecasting.
 - [ ] **Portfolio Greeks**: Combined Greeks tracking for multi-symbol portfolios.
 - [ ] **Mobile App PWA**: Transform the dashboard into a Progressive Web App for better mobile experience.
