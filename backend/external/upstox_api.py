@@ -17,7 +17,7 @@ class UpstoxAPIClient:
         self.configuration.access_token = access_token
         self.api_client = upstox_client.ApiClient(self.configuration)
 
-    async def get_hist_candles(self, symbol: str, interval: str, count: int) -> List[List]:
+    async def get_hist_candles(self, symbol: str, interval: str, count: int, from_date: str = None, to_date: str = None) -> List[List]:
         """Fetch historical candles from Upstox with client-side aggregation for unsupported timeframes."""
         supported_intervals = ["1", "30", "1D", "1W", "1M", "D", "W"]
 
@@ -25,12 +25,11 @@ class UpstoxAPIClient:
         needs_aggregation = interval not in supported_intervals and interval.isdigit()
         fetch_interval = "1" if needs_aggregation else interval
 
-        logger.info(f"Upstox fetching historical candles for {symbol} (interval={interval}, count={count})")
+        logger.info(f"Upstox fetching historical candles for {symbol} (interval={interval}, count={count}, from={from_date}, to={to_date})")
         try:
             instrument_key = symbol_mapper.to_upstox_key(symbol)
             history_api = upstox_client.HistoryApi(self.api_client)
-            u_interval = "1minute" if interval == "1" else f"{interval}minute" if interval.isdigit() else "day"
-            now = datetime.now().strftime("%Y-%m-%d")
+            now_str = to_date if to_date else datetime.now().strftime("%Y-%m-%d")
 
             def fetch():
                 try:
@@ -41,16 +40,19 @@ class UpstoxAPIClient:
                                       "week" if fetch_interval in ["1W", "W"] else \
                                       "month" if fetch_interval in ["1M", "M"] else "1minute"
 
-                    # Try intraday first if it's a small interval
-                    if upstox_interval in ["1minute", "30minute"]:
+                    # Try intraday first if it's a small interval and no specific range requested
+                    if not from_date and upstox_interval in ["1minute", "30minute"]:
                          res = history_api.get_intra_day_candle_data(instrument_key, upstox_interval, "2.0")
                          if res and res.status == "success" and res.data and res.data.candles:
                              return res
 
-                    # Fallback to historical for larger window or if intraday empty
-                    days_back = 7 if upstox_interval == "1minute" else 30 if upstox_interval == "30minute" else 365
-                    from_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
-                    res = history_api.get_historical_candle_data1(instrument_key, upstox_interval, now, from_date, "2.0")
+                    # Use provided range or fallback to historical defaults
+                    f_date = from_date
+                    if not f_date:
+                        days_back = 7 if upstox_interval == "1minute" else 30 if upstox_interval == "30minute" else 365
+                        f_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+
+                    res = history_api.get_historical_candle_data1(instrument_key, upstox_interval, now_str, f_date, "2.0")
                     return res
                 except ApiException as e:
                     logger.error(f"Upstox API Error fetching candles for {symbol}: {e}")

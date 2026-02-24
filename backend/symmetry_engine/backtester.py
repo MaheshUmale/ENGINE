@@ -1,5 +1,6 @@
 import pandas as pd
 import datetime
+import asyncio
 from .data_provider import DataProvider
 from .strategy import StrategyEngine
 from .database import get_session, Trade, Signal, ReferenceLevel, Candle, RawTick
@@ -84,7 +85,7 @@ class Backtester:
             print(f"Processing date: {date_str}")
 
             # 1. Fetch historical data for Index to get ATM at market open
-            idx_morning = self.data_provider.get_historical_data(INDICES[self.index_name]['index_key'], from_date=date_str, to_date=date_str)
+            idx_morning = await self.data_provider.get_historical_data(INDICES[self.index_name]['index_key'], from_date=date_str, to_date=date_str)
 
             # If today and empty, try to get LTP for discovery
             if (idx_morning is None or idx_morning.empty) and date_str == datetime.datetime.now().strftime('%Y-%m-%d'):
@@ -116,34 +117,45 @@ class Backtester:
 
             print(f"Instruments for {date_str}: CE={details['ce']}, PE={details['pe']}, ATM={details['strike']}")
 
-            idx_hist = self.data_provider.get_historical_data(details['index'], from_date=date_str, to_date=date_str)
+            idx_hist = await self.data_provider.get_historical_data(details['index'], from_date=date_str, to_date=date_str)
 
             # Fetch other index data if sync is enabled
             other_indices_hist = {}
             if ENABLE_INDEX_SYNC:
                 for name, cfg in INDICES.items():
                     if name != self.index_name:
-                        oh = self.data_provider.get_historical_data(cfg['index_key'], from_date=date_str, to_date=date_str)
+                        oh = await self.data_provider.get_historical_data(cfg['index_key'], from_date=date_str, to_date=date_str)
                         if oh is not None:
                             other_indices_hist[name] = oh
 
             # To support dynamic strike updates, we fetch the whole 7-strike chain
             # Also fetch data for any active positions carried over from previous day
             chain_data = {}
-            target_keys = []
+            target_keys = set()
             for opt in details['option_chain']:
-                target_keys.extend([opt['ce'], opt['pe']])
+                target_keys.add(opt['ce'])
+                target_keys.add(opt['pe'])
 
             # Add keys from active positions
             for pos in self.execution.positions.values():
-                if pos.get('ce_key'): target_keys.append(pos['ce_key'])
-                if pos.get('pe_key'): target_keys.append(pos['pe_key'])
+                if pos.get('ce_key'): target_keys.add(pos['ce_key'])
+                if pos.get('pe_key'): target_keys.add(pos['pe_key'])
 
-            for key in set(target_keys):
-                d = self.data_provider.get_historical_data(key, from_date=date_str, to_date=date_str)
-                if d is not None: chain_data[key] = d
+            # Parallelize historical data fetching for efficiency
+            keys_list = list(target_keys)
+            print(f"Fetching historical data for {len(keys_list)} instruments in parallel...")
 
-            fut_hist = self.data_provider.get_historical_data(details['fut'], from_date=date_str, to_date=date_str)
+            tasks = [self.data_provider.get_historical_data(k, from_date=date_str, to_date=date_str) for k in keys_list]
+            # Include Future data in the parallel fetch
+            tasks.append(self.data_provider.get_historical_data(details['fut'], from_date=date_str, to_date=date_str))
+
+            results = await asyncio.gather(*tasks)
+
+            # Map results back
+            for i, key in enumerate(keys_list):
+                if results[i] is not None: chain_data[key] = results[i]
+
+            fut_hist = results[-1]
 
             if idx_hist is None or idx_hist.empty:
                 print(f"Skipping {date_str} due to missing index data.")

@@ -30,8 +30,16 @@ class DataProvider:
                 logger.error("No historical provider available")
                 return None
 
-            # Use 1000 as default count
-            candles = await provider.get_hist_candles(instrument_key, str(interval), 1000)
+            # Use 1000 as default count, but support date range if provider does
+            if hasattr(provider, 'get_hist_candles'):
+                import inspect
+                sig = inspect.signature(provider.get_hist_candles)
+                if 'from_date' in sig.parameters:
+                    candles = await provider.get_hist_candles(instrument_key, str(interval), 1000, from_date=from_date, to_date=to_date)
+                else:
+                    candles = await provider.get_hist_candles(instrument_key, str(interval), 1000)
+            else:
+                return None
 
             if candles:
                 # Unified app returns [ts, o, h, l, c, v] where ts is unix seconds

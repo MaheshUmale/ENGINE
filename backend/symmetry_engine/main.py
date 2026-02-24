@@ -64,7 +64,7 @@ class TradingBot:
         instruments = self.instruments[index_name]
 
         # Use UTC for all DB-stored timestamps to ensure alignment with signals/trades
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         minute = now.replace(second=0, microsecond=0)
 
         buffer_key = f"{index_name}_{key}"
@@ -140,7 +140,7 @@ class TradingBot:
         # Run strategy signals on every tick if reference levels exist
         signal = engine.generate_signals(instruments)
         if signal:
-            signal.timestamp = datetime.datetime.utcnow()
+            signal.timestamp = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
             # Enrich signal with bid/ask for dynamic slippage
             active_opt_key = instruments['ce'] if signal.side == 'BUY_CE' else instruments['pe']
@@ -259,12 +259,12 @@ class TradingBot:
                         engine.trailing_sl[index_name] = pos['trailing_sl']
                         print(f"State Recovery: Recovered trailing SL for {index_name}: {pos['trailing_sl']}")
 
-                    # Fetch history for position strikes to enable immediate ATR calculation
-                    for side in ['ce_key', 'pe_key']:
-                        key = pos.get(side)
-                        if key:
-                            print(f"State Recovery: Fetching history for position strike {key}")
-                            hist = await self.data_provider.get_historical_data(key, interval=1)
+                    # Parallelize history fetching for position strikes
+                    pos_keys = [pos.get(k) for k in ['ce_key', 'pe_key'] if pos.get(k)]
+                    if pos_keys:
+                        print(f"State Recovery: Fetching history for position strikes {pos_keys}")
+                        hist_results = await asyncio.gather(*[self.data_provider.get_historical_data(k, interval=1) for k in pos_keys])
+                        for key, hist in zip(pos_keys, hist_results):
                             if hist is not None and not hist.empty:
                                 for _, row in hist.tail(20).iterrows():
                                     engine.update_candle(key, {
