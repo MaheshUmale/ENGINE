@@ -55,8 +55,7 @@ class TrendlyneOptionsProvider(IOptionsDataProvider):
     def __init__(self):
         self.symbol_map = {
             "NSE:NIFTY": "NIFTY 50",
-            "NSE:BANKNIFTY": "BANKNIFTY",
-            "NSE:FINNIFTY": "FINNIFTY"
+            "NSE:BANKNIFTY": "BANKNIFTY"
         }
 
     async def get_option_chain(self, underlying: str) -> Dict[str, Any]:
@@ -83,7 +82,6 @@ class NSEOptionsProvider(IOptionsDataProvider):
     """NSE India Direct Implementation for Options data."""
     async def get_option_chain(self, underlying: str) -> Dict[str, Any]:
         symbol = underlying.split(':')[-1]
-        if symbol == "CNXFINANCE": symbol = "FINNIFTY"
         data = await asyncio.to_thread(fetch_nse_oi_data, symbol)
         # Transform NSE format to a unified format if necessary
         return data

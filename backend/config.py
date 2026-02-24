@@ -41,15 +41,13 @@ LOGGING_CONFIG = {
 # Options Configuration
 OPTIONS_UNDERLYINGS: List[str] = [
     "NSE:NIFTY",
-    "NSE:BANKNIFTY",
-    "NSE:FINNIFTY"
+    "NSE:BANKNIFTY"
 ]
 
 # Initial instruments for WebSocket feed
 INITIAL_INSTRUMENTS: List[str] = [
     "NSE:NIFTY",
-    "NSE:BANKNIFTY",
-    "NSE:FINNIFTY"
+    "NSE:BANKNIFTY"
 ]
 
 # Greeks Calculator Configuration
@@ -113,7 +111,6 @@ UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN", "")
 UPSTOX_INDEX_MAP = {
     "NSE:NIFTY": "NSE_INDEX|Nifty 50",
     "NSE:BANKNIFTY": "NSE_INDEX|Nifty Bank",
-    "NSE:FINNIFTY": "NSE_INDEX|Nifty Fin Service",
     "BSE:SENSEX": "BSE_INDEX|SENSEX",
     "BSE:BANKEX": "BSE_INDEX|BANKEX",
 }

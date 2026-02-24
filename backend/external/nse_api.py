@@ -44,7 +44,7 @@ def fetch_nse_oi_data(symbol="NIFTY"):
     """Fetches OI data directly from NSE."""
     try:
         cookies = get_nse_cookies()
-        if symbol in ["NIFTY", "BANKNIFTY", "FINNIFTY"]:
+        if symbol in ["NIFTY", "BANKNIFTY"]:
             url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
         else:
             url = f"https://www.nseindia.com/api/option-chain-equities?symbol={symbol}"
