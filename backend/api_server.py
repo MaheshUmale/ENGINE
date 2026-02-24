@@ -849,7 +849,7 @@ async def get_symmetry_trades():
     session = get_session()
     try:
         trades = session.query(Trade).order_by(Trade.timestamp.desc()).limit(100).all()
-        return [{"id": t.id, "timestamp": t.timestamp, "index": t.index_name, "instrument": t.instrument_key, "side": t.side, "price": t.price, "pnl": t.pnl, "status": t.status} for t in trades]
+        return [{"id": t.id, "timestamp": t.timestamp, "index": t.index_name, "instrument": t.instrument_key, "side": t.side, "price": t.price, "exit_price": t.exit_price, "pnl": t.pnl, "status": t.status} for t in trades]
     finally:
         session.close()
 

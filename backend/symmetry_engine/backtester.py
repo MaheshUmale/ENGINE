@@ -128,12 +128,20 @@ class Backtester:
                             other_indices_hist[name] = oh
 
             # To support dynamic strike updates, we fetch the whole 7-strike chain
+            # Also fetch data for any active positions carried over from previous day
             chain_data = {}
+            target_keys = []
             for opt in details['option_chain']:
-                ce_d = self.data_provider.get_historical_data(opt['ce'], from_date=date_str, to_date=date_str)
-                pe_d = self.data_provider.get_historical_data(opt['pe'], from_date=date_str, to_date=date_str)
-                if ce_d is not None: chain_data[opt['ce']] = ce_d
-                if pe_d is not None: chain_data[opt['pe']] = pe_d
+                target_keys.extend([opt['ce'], opt['pe']])
+
+            # Add keys from active positions
+            for pos in self.execution.positions.values():
+                if pos.get('ce_key'): target_keys.append(pos['ce_key'])
+                if pos.get('pe_key'): target_keys.append(pos['pe_key'])
+
+            for key in set(target_keys):
+                d = self.data_provider.get_historical_data(key, from_date=date_str, to_date=date_str)
+                if d is not None: chain_data[key] = d
 
             fut_hist = self.data_provider.get_historical_data(details['fut'], from_date=date_str, to_date=date_str)
 
@@ -306,11 +314,15 @@ class Backtester:
                     if self.strategy.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data):
                         exit_price = ce_data['ltp'] if pos['side'] == 'BUY_CE' else pe_data['ltp']
 
-                        trade = self.execution.close_position(self.index_name, exit_price, timestamp=current_time, index_price=current['close_idx'])
+                        if exit_price > 0:
+                            trade = self.execution.close_position(self.index_name, exit_price, timestamp=current_time, index_price=current['close_idx'])
 
-                        if trade:
-                            self.strategy.reset_trailing_sl()
-                            self.risk_manager.update_pnl(trade.pnl)
+                            if trade:
+                                self.strategy.reset_trailing_sl()
+                                self.risk_manager.update_pnl(trade.pnl)
+                        else:
+                            # If price is 0 (missing data), don't exit yet to avoid ruined stats
+                            pass
 
             if not is_warmup:
                 all_combined.append(combined[['timestamp', 'open_idx', 'high_idx', 'low_idx', 'close_idx']])

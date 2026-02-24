@@ -306,8 +306,9 @@ class StrategyEngine:
             atr = self.calculate_atr(opt_key) if opt_key else 0
             if atr > 0:
                 # Initialize or update trailing SL
-                if self.index_name not in self.trailing_sl:
+                if not self.trailing_sl.get(self.index_name):
                     self.trailing_sl[self.index_name] = entry_price - (self.atr_multiplier * atr)
+                    print(f"SL INITIALIZED for {self.index_name} at {self.trailing_sl[self.index_name]:.2f} (ATR: {atr:.2f})")
 
                 # Update trailing SL (only moves up)
                 new_sl = active_opt_data['ltp'] - (self.atr_multiplier * atr)
