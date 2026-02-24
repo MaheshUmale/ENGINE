@@ -31,23 +31,27 @@ Parameters:
 """
 
 async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
-    print(f"=== Symmetry Strategy Backtest: {underlying} ===")
+    print(f"=== Symmetry Strategy Backtest: {underlying} ===", flush=True)
     initialize_default_providers()
-    provider = historical_data_registry.get_primary()
+    # Force Upstox for backtest to avoid TV session issues in headless environment
+    provider = historical_data_registry.get_provider("upstox") or historical_data_registry.get_primary()
 
     # 1. Fetch Index Data
-    print(f"Fetching {count} index candles...")
+    print(f"Fetching {count} index candles...", flush=True)
     idx_candles = await provider.get_hist_candles(underlying, interval, count)
     if not idx_candles:
         print("Error: Could not fetch index candles.")
         return
 
     # 2. Discover ATM symbols
+    print(f"Index data fetched. Last spot: {idx_candles[-1][4]}")
     last_spot = idx_candles[-1][4]
     strike_interval = 50 if "NIFTY" in underlying and "BANK" not in underlying else 100
     atm_strike = round(last_spot / strike_interval) * strike_interval
 
+    print("Refreshing symbols...")
     await options_manager._refresh_wss_symbols(underlying)
+    print("Symbols refreshed.")
     ce_sym = options_manager.symbol_map_cache.get(underlying, {}).get(f"{float(atm_strike)}_call") or \
              options_manager.symbol_map_cache.get(underlying, {}).get(f"{int(atm_strike)}_call")
     pe_sym = options_manager.symbol_map_cache.get(underlying, {}).get(f"{float(atm_strike)}_put") or \

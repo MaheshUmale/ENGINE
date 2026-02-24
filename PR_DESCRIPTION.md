@@ -128,9 +128,11 @@ The enhanced dashboard includes:
 
 ## Documentation
 
-- `OPTIONS_ENHANCEMENTS.md` - Comprehensive feature documentation
-- Inline code documentation for all new modules
-- API endpoint documentation in code comments
+- `CONSOLIDATED_REQUIREMENTS.md` - Unified source of truth for all system requirements and status.
+- `TODO.md` - Tracked list of remaining items and future upgrades.
+- `OPTIONS_ENHANCEMENTS.md` - Comprehensive feature documentation.
+- `DATA_PROVIDERS.md` - Integration guide for external data sources.
+- `UI_UX_AUDIT.md` - Visual and usability refinement report.
 
 ## Backwards Compatibility
 
