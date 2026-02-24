@@ -42,7 +42,11 @@ class TradingViewAPI:
         self.symbol_map = {
             'NIFTY': {'symbol': 'NIFTY', 'exchange': 'NSE'},
             'BANKNIFTY': {'symbol': 'BANKNIFTY', 'exchange': 'NSE'},
-            'INDIA VIX': {'symbol': 'INDIAVIX', 'exchange': 'NSE'}
+            'INDIA VIX': {'symbol': 'INDIAVIX', 'exchange': 'NSE'},
+            'NSE_INDEX|NIFTY 50': {'symbol': 'NIFTY', 'exchange': 'NSE'},
+            'NSE_INDEX|NIFTY BANK': {'symbol': 'BANKNIFTY', 'exchange': 'NSE'},
+            'NSE:NIFTY': {'symbol': 'NIFTY', 'exchange': 'NSE'},
+            'NSE:BANKNIFTY': {'symbol': 'BANKNIFTY', 'exchange': 'NSE'}
         }
 
     def _init_streamer(self):
@@ -54,6 +58,7 @@ class TradingViewAPI:
 
     def get_hist_candles(self, symbol_or_hrn, interval_min='1', n_bars=1000):
         try:
+            from core.symbol_mapper import symbol_mapper
             logger.info(f"Fetching historical candles for {symbol_or_hrn}")
             if not symbol_or_hrn: return None
 
@@ -64,18 +69,60 @@ class TradingViewAPI:
                 parts = symbol_or_hrn.split(':')
                 tv_exchange = parts[0].upper()
                 tv_symbol = parts[1].upper()
-                symbol_or_hrn = tv_symbol
 
-            if symbol_or_hrn in self.symbol_map:
-                meta = self.symbol_map[symbol_or_hrn]
+            # Normalize for map lookup
+            lookup_key = symbol_or_hrn.upper().replace(':', '|')
+            if lookup_key in self.symbol_map:
+                meta = self.symbol_map[lookup_key]
                 tv_symbol = meta['symbol']
                 tv_exchange = meta['exchange']
-            elif symbol_or_hrn.upper() == 'NIFTY':
-                tv_symbol = 'NIFTY'
-            elif symbol_or_hrn.upper() == 'BANKNIFTY':
-                tv_symbol = 'BANKNIFTY'
+            else:
+                # Use symbol_mapper for generic index/symbol extraction
+                clean = symbol_mapper.get_symbol(symbol_or_hrn)
+                if clean in ['NIFTY', 'BANKNIFTY', 'INDIA VIX']:
+                    tv_symbol = clean.replace(' ', '')
+                    tv_exchange = 'NSE'
+                elif clean:
+                    tv_symbol = clean
 
-            # Try Streamer first
+            # 1. Try tvDatafeed first for historical data (more stable for one-offs)
+            if self.tv:
+                try:
+                    tv_interval = Interval.in_1_minute
+                    if interval_min == '3': tv_interval = Interval.in_3_minute
+                    elif interval_min == '5': tv_interval = Interval.in_5_minute
+                    elif interval_min == '15': tv_interval = Interval.in_15_minute
+                    elif interval_min == '30': tv_interval = Interval.in_30_minute
+                    elif interval_min == '45': tv_interval = Interval.in_45_minute
+                    elif interval_min == '60': tv_interval = Interval.in_1_hour
+                    elif interval_min == '120': tv_interval = Interval.in_2_hour
+                    elif interval_min == '240': tv_interval = Interval.in_4_hour
+                    elif interval_min == 'D' or interval_min == '1d': tv_interval = Interval.in_daily
+                    elif interval_min == 'W' or interval_min == '1w': tv_interval = Interval.in_weekly
+
+                    df = self.tv.get_hist(symbol=tv_symbol, exchange=tv_exchange, interval=tv_interval, n_bars=n_bars)
+                    if df is not None and not df.empty:
+                        candles = []
+                        import pytz
+                        ist = pytz.timezone('Asia/Kolkata')
+                        for ts, row in df.iterrows():
+                            try:
+                                ts_ist = ist.localize(ts) if ts.tzinfo is None else ts.astimezone(ist)
+                                unix_ts = int(ts_ist.timestamp())
+                            except:
+                                unix_ts = int(ts.timestamp())
+
+                            candles.append([
+                                unix_ts,
+                                float(row['open']), float(row['high']), float(row['low']), float(row['close']),
+                                float(row['volume'])
+                            ])
+                        logger.info(f"Retrieved {len(candles)} candles via tvDatafeed for {tv_exchange}:{tv_symbol}")
+                        return candles[::-1] # Newest first
+                except Exception as tv_e:
+                    logger.warning(f"tvDatafeed failed for {tv_symbol}: {tv_e}")
+
+            # 2. Fallback to Streamer
             try:
                 tf = f"{interval_min}m"
                 if interval_min == 'D': tf = '1d'
@@ -84,8 +131,7 @@ class TradingViewAPI:
                 elif interval_min == '120': tf = '2h'
                 elif interval_min == '240': tf = '4h'
 
-                logger.info(f"Using timeframe {tf} for Streamer (interval_min={interval_min})")
-
+                logger.info(f"Using timeframe {tf} for Streamer fallback (interval_min={interval_min})")
                 if not self.streamer: self._init_streamer()
 
                 with contextlib.redirect_stdout(io.StringIO()):
@@ -122,41 +168,7 @@ class TradingViewAPI:
             except Exception as e:
                 logger.warning(f"Streamer failed for {tv_symbol}: {e}")
 
-            # Fallback to tvDatafeed
-            if self.tv:
-                tv_interval = Interval.in_1_minute
-                if interval_min == '3': tv_interval = Interval.in_3_minute
-                elif interval_min == '5': tv_interval = Interval.in_5_minute
-                elif interval_min == '15': tv_interval = Interval.in_15_minute
-                elif interval_min == '30': tv_interval = Interval.in_30_minute
-                elif interval_min == '45': tv_interval = Interval.in_45_minute
-                elif interval_min == '60': tv_interval = Interval.in_1_hour
-                elif interval_min == '120': tv_interval = Interval.in_2_hour
-                elif interval_min == '240': tv_interval = Interval.in_4_hour
-                elif interval_min == 'D' or interval_min == '1d': tv_interval = Interval.in_daily
-                elif interval_min == 'W' or interval_min == '1w': tv_interval = Interval.in_weekly
-
-                df = self.tv.get_hist(symbol=tv_symbol, exchange=tv_exchange, interval=tv_interval, n_bars=n_bars)
-                if df is not None and not df.empty:
-                    candles = []
-                    import pytz
-                    ist = pytz.timezone('Asia/Kolkata')
-                    for ts, row in df.iterrows():
-                        try:
-                            ts_ist = ist.localize(ts) if ts.tzinfo is None else ts.astimezone(ist)
-                            unix_ts = int(ts_ist.timestamp())
-                        except:
-                            unix_ts = int(ts.timestamp())
-
-                        candles.append([
-                            unix_ts,
-                            float(row['open']), float(row['high']), float(row['low']), float(row['close']),
-                            float(row['volume'])
-                        ])
-                    logger.info(f"Retrieved {len(candles)} candles via tvDatafeed")
-                    return candles[::-1]
-
-            # Final Fallback to Local DB (for Replay support)
+            # 3. Final Fallback to Local DB (for Replay support or when TV is down)
             try:
                 from db.local_db import db
                 orig_key = symbol_or_hrn
