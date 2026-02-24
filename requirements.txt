@@ -10,3 +10,10 @@ fastapi
 jinja2
 uvicorn
 python-multipart
+duckdb
+scipy
+motor
+python-socketio
+pytz
+httpx
+tradingview-scraper

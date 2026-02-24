@@ -61,7 +61,7 @@ class ExecutionEngine:
         self.balance -= entry_cost
 
         session = self.get_session()
-        ts = timestamp if timestamp else (signal.timestamp if signal.timestamp else datetime.datetime.utcnow())
+        ts = timestamp if timestamp else (signal.timestamp if signal.timestamp else datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None))
         trade = Trade(
             timestamp=ts,
             index_name=signal.index_name,
@@ -149,7 +149,7 @@ class ExecutionEngine:
         self.balance += pnl_net
 
         exit_trade = Trade(
-            timestamp=timestamp if timestamp else datetime.datetime.utcnow(),
+            timestamp=timestamp if timestamp else datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
             index_name=index_name,
             instrument_key=pos['side'],
             side='SELL',

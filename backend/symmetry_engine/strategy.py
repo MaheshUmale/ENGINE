@@ -430,7 +430,7 @@ class StrategyEngine:
     def save_reference_level(self, level_type, index_price, ce_price, pe_price, ce_key, pe_key, timestamp=None):
         session = self.get_session()
         ref = ReferenceLevel(
-            timestamp=timestamp if timestamp else datetime.datetime.utcnow(),
+            timestamp=timestamp if timestamp else datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
             index_name=self.index_name,
             type=level_type,
             index_price=index_price,

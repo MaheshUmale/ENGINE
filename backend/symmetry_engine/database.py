@@ -9,7 +9,7 @@ Base = declarative_base()
 class RawTick(Base):
     __tablename__ = 'raw_ticks'
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None))
     instrument_key = Column(String)
     ltp = Column(Float)
     volume = Column(Float)
@@ -70,7 +70,7 @@ class Trade(Base):
 class Notification(Base):
     __tablename__ = 'notifications'
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None))
     message = Column(String)
     is_read = Column(Boolean, default=False)
 

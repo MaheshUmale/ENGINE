@@ -190,5 +190,5 @@ class UpstoxOptionsProvider(IOptionsDataProvider):
 
 class UpstoxHistoricalProvider(IHistoricalDataProvider):
     """Upstox Historical Data Implementation."""
-    async def get_hist_candles(self, symbol: str, interval: str, count: int) -> List[List]:
-        return await upstox_api_client.get_hist_candles(symbol, interval, count)
+    async def get_hist_candles(self, symbol: str, interval: str, count: int, from_date: str = None, to_date: str = None) -> List[List]:
+        return await upstox_api_client.get_hist_candles(symbol, interval, count, from_date=from_date, to_date=to_date)

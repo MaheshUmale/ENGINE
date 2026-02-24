@@ -31,12 +31,11 @@ def calculate_portfolio_greeks(index_name=None):
             chain_res = options_manager.get_chain_with_greeks(underlying)
             spot = chain_res.get('spot_price', 0)
 
-            # Find the specific strike and expiry for this instrument_key
-            # instrument_key is something like NIFTY260220C25000
-            # For simplicity, we can extract strike/type from the key if not found in chain
+            # Use instrument_ce or instrument_pe based on the side (BUY_CE or BUY_PE)
+            active_key = trade.instrument_ce if 'CE' in (trade.instrument_key or '') else trade.instrument_pe
 
             # Find item in current chain
-            item = next((c for c in chain_res.get('chain', []) if c['symbol'] == trade.instrument_key), None)
+            item = next((c for c in chain_res.get('chain', []) if c['symbol'] == active_key), None)
 
             if item:
                 strike = item['strike']
