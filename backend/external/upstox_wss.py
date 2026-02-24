@@ -114,13 +114,23 @@ class UpstoxWSS:
                     elif market_ff:
                         ltpc = market_ff.get('ltpc', {})
                         market_pic = market_ff.get('marketPic', {})
+                        depth = market_ff.get('depth', {})
+
+                        # Extract bid/ask from depth if available
+                        bids = depth.get('buy', [])
+                        asks = depth.get('sell', [])
+                        bid = safe_float(bids[0].get('price')) if bids else None
+                        ask = safe_float(asks[0].get('price')) if asks else None
+
                         ltt = safe_int(ltpc.get('ltt', market_pic.get('ltt')))
                         ts_ms = ltt * 1000 if 0 < ltt < 1e12 else ltt
                         feed_data = {
                             'last_price': safe_float(ltpc.get('ltp') if ltpc.get('ltp') is not None else market_pic.get('ltp')),
                             'ltq': safe_int(market_pic.get('ltq')),
                             'ts_ms': ts_ms,
-                            'upstox_volume': safe_float(market_pic.get('vtt'))
+                            'upstox_volume': safe_float(market_pic.get('vtt')),
+                            'bid': bid,
+                            'ask': ask
                         }
                     else:
                         # Fallback for other potential fullFeed structures

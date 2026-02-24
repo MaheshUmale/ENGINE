@@ -48,7 +48,13 @@ class TradingBot:
             for index_name, engine in self.engines.items():
                 if key in self.instruments.get(index_name, {}).values():
                     oi_delta = self.data_provider.calculate_oi_delta(key, oi)
-                    engine.update_data(key, {'ltp': ltp, 'oi': oi, 'oi_delta': oi_delta})
+                    engine.update_data(key, {
+                        'ltp': ltp,
+                        'oi': oi,
+                        'oi_delta': oi_delta,
+                        'bid': data.get('bid'),
+                        'ask': data.get('ask')
+                    })
 
                     # Aggregation and Signal Generation
                     await self.aggregate_and_process(index_name, key, ltp, vtt)
@@ -134,6 +140,13 @@ class TradingBot:
         signal = engine.generate_signals(instruments)
         if signal:
             signal.timestamp = datetime.datetime.utcnow()
+
+            # Enrich signal with bid/ask for dynamic slippage
+            active_opt_key = instruments['ce'] if signal.side == 'BUY_CE' else instruments['pe']
+            active_opt_data = engine.current_data.get(active_opt_key, {})
+            signal.details['bid'] = active_opt_data.get('bid')
+            signal.details['ask'] = active_opt_data.get('ask')
+
             # Enhancement: Multi-Index Sync Check
             if ENABLE_INDEX_SYNC:
                 other_sync = True
@@ -176,7 +189,9 @@ class TradingBot:
             from types import SimpleNamespace
             if engine.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data):
                 exit_price = ce_data.get('ltp') if pos['side'] == 'BUY_CE' else pe_data.get('ltp')
-                trade = self.execution.close_position(index_name, exit_price, index_price=idx_data.get('ltp'))
+                bid = ce_data.get('bid') if pos['side'] == 'BUY_CE' else pe_data.get('bid')
+
+                trade = self.execution.close_position(index_name, exit_price, index_price=idx_data.get('ltp'), bid=bid)
                 if trade:
                     engine.reset_trailing_sl()
                     self.risk_manager.update_pnl(trade.pnl)

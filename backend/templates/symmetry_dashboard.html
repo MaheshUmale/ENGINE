@@ -86,6 +86,26 @@
             </div>
         </div>
 
+        <!-- Portfolio Greeks -->
+        <div id="portfolio-greeks" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="glass-panel p-4 rounded-2xl border-b-2 border-blue-500/30">
+                <div class="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Portfolio Delta</div>
+                <div id="p-delta" class="text-lg font-black text-white">0.00</div>
+            </div>
+            <div class="glass-panel p-4 rounded-2xl border-b-2 border-purple-500/30">
+                <div class="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Portfolio Gamma</div>
+                <div id="p-gamma" class="text-lg font-black text-white">0.00</div>
+            </div>
+            <div class="glass-panel p-4 rounded-2xl border-b-2 border-yellow-500/30">
+                <div class="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Portfolio Theta</div>
+                <div id="p-theta" class="text-lg font-black text-white">0.00</div>
+            </div>
+            <div class="glass-panel p-4 rounded-2xl border-b-2 border-green-500/30">
+                <div class="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Portfolio Vega</div>
+                <div id="p-vega" class="text-lg font-black text-white">0.00</div>
+            </div>
+        </div>
+
         <!-- Charts Section -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div class="glass-panel p-5 rounded-3xl h-[400px]">
@@ -272,17 +292,20 @@
 
         async function refreshData() {
             try {
-                const [tradesResp, signalsResp, statsResp] = await Promise.all([
+                const [tradesResp, signalsResp, statsResp, greeksResp] = await Promise.all([
                     fetch('/api/symmetry/trades'),
                     fetch('/api/symmetry/signals'),
-                    fetch('/api/symmetry/stats')
+                    fetch('/api/symmetry/stats'),
+                    fetch('/api/symmetry/portfolio-greeks')
                 ]);
 
                 const trades = await tradesResp.json();
                 const signals = await signalsResp.json();
                 const stats = await statsResp.json();
+                const greeks = await greeksResp.json();
 
                 updateStats(stats);
+                updatePortfolioGreeks(greeks);
                 renderTrades(trades);
                 renderSignals(signals);
                 renderEquityChart(trades);
@@ -290,6 +313,15 @@
             } catch (e) {
                 console.error("Failed to refresh data", e);
             }
+        }
+
+        function updatePortfolioGreeks(greeks) {
+            document.getElementById('p-delta').innerText = greeks.delta.toFixed(2);
+            document.getElementById('p-gamma').innerText = greeks.gamma.toFixed(4);
+            document.getElementById('p-theta').innerText = greeks.theta.toFixed(2);
+            document.getElementById('p-vega').innerText = greeks.vega.toFixed(2);
+
+            document.getElementById('p-delta').className = `text-lg font-black ${greeks.delta >= 0 ? 'text-green-400' : 'text-red-400'}`;
         }
 
         function updateStats(stats) {

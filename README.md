@@ -47,6 +47,19 @@ A minimal, high-performance trading terminal featuring TradingView charting, rea
   - **Decay Divergence**: Detects bullish momentum by identifying option prices that resist theta decay.
   - **Automated Visualization**: Direct marking of BUY_CE/BUY_PE signals on the chart with dynamic SL and TP price lines.
 - **Efficient Backend**: Built with FastAPI and DuckDB for low-latency data handling and persistence.
+- **Advanced Backtest Engine (GUI)**:
+  - Accessible at `/backtest`.
+  - Modern Plotly-powered interface for parameter tuning (Swing window, ATR multiplier).
+  - Visualization of equity curves and detailed trade logs with entry/exit prices.
+  - Isolated database runs to protect live data.
+- **Custom Indicator Scripting**:
+  - Users can write simple JavaScript indicators directly in the terminal UI.
+  - Script evaluation against real-time candle data with immediate plotting.
+- **Portfolio-Level Greeks**:
+  - Aggregate Delta, Gamma, Theta, and Vega tracking for all open paper trading positions.
+  - Real-time updates on the Symmetry Dashboard.
+- **Robust Paper Trading Persistence**:
+  - Active positions and bot states (trailing SL, reference levels) survive server restarts.
 - **Enhanced Data Engine**: Integrated enterprise-grade TradingView module featuring:
   - **Intelligent Caching**: Multi-layered cache for historical and real-time data.
   - **Connection Monitoring**: Real-time tracking of latency, stability, and protocol health.
