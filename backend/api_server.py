@@ -33,7 +33,7 @@ from core.strategy_builder import strategy_builder, StrategyType
 from core.alert_system import alert_system, AlertType
 from brain.nse_confluence_scalper import scalper
 from symmetry_engine.main import TradingBot
-from symmetry_engine.database import get_session, Signal, Trade
+from symmetry_engine.database import get_session, Signal, Trade, ReferenceLevel
 from external.tv_api import tv_api
 from external.tv_scanner import search_options
 from db.local_db import db
@@ -379,6 +379,76 @@ async def get_intraday(
                                 })
                 except Exception as e:
                     logger.error(f"Symmetry analysis error for {clean_key}: {e}")
+
+            # Actual Bot Signals, Trades, and Reference Levels from Symmetry Engine
+            if is_index and interval == '1':
+                try:
+                    # Map HRN or clean_key to index_name used in symmetry engine
+                    index_name = "NIFTY" if "NIFTY" in clean_key else "BANKNIFTY" if "BANKNIFTY" in clean_key else None
+                    if index_name:
+                        session = get_session()
+                        # Fetch signals (limited to last 1000 for chart performance)
+                        bot_signals = session.query(Signal).filter(Signal.index_name == index_name).order_by(Signal.timestamp.desc()).limit(500).all()
+                        # Fetch trades
+                        bot_trades = session.query(Trade).filter(Trade.index_name == index_name).order_by(Trade.timestamp.desc()).limit(500).all()
+                        # Fetch ref levels
+                        bot_ref_levels = session.query(ReferenceLevel).filter(ReferenceLevel.index_name == index_name).order_by(ReferenceLevel.timestamp.desc()).limit(100).all()
+                        session.close()
+
+                        bot_markers = []
+                        for sig in bot_signals:
+                            # Floor to nearest minute to align with candles
+                            ts = int(sig.timestamp.timestamp())
+                            ts = ts - (ts % 60)
+                            bot_markers.append({
+                                "time": ts,
+                                "position": "belowBar" if "CE" in sig.side else "aboveBar",
+                                "color": "#3b82f6", # Bot signals in Blue
+                                "shape": "arrowUp" if "CE" in sig.side else "arrowDown",
+                                "text": f"BOT:{sig.side}",
+                                "id": f"bot_sig_{sig.id}"
+                            })
+
+                        for tr in bot_trades:
+                            # Floor to nearest minute
+                            ts = int(tr.timestamp.timestamp())
+                            ts = ts - (ts % 60)
+                            bot_markers.append({
+                                "time": ts,
+                                "position": "belowBar" if tr.side == 'BUY' else "aboveBar",
+                                "color": "#eab308", # Bot trades in Yellow
+                                "shape": "circle" if tr.side == 'BUY' else "square",
+                                "text": f"BOT-{tr.side} @ {tr.price}",
+                                "id": f"bot_trade_{tr.id}"
+                            })
+
+                        if bot_markers:
+                            indicators.append({
+                                "id": "bot_actions", "type": "markers", "title": "Bot Actions",
+                                "data": bot_markers
+                            })
+
+                        # Ref levels as price lines
+                        ref_lines = []
+                        # Use a set to only show unique/latest levels per type if many exist
+                        seen_types = set()
+                        for ref in bot_ref_levels:
+                            if ref.type not in seen_types:
+                                ref_lines.append({
+                                    "price": ref.index_price,
+                                    "color": "#6366f1" if ref.type == 'High' else "#f43f5e",
+                                    "width": 1,
+                                    "title": f"BOT-{ref.type}"
+                                })
+                                seen_types.add(ref.type)
+
+                        if ref_lines:
+                            indicators.append({
+                                "id": "bot_ref_levels", "type": "price_lines", "title": "Bot Ref Levels",
+                                "data": ref_lines
+                            })
+                except Exception as e:
+                    logger.error(f"Error fetching bot data for chart: {e}")
 
             # RVOL & High Volume Node Indicators
             try:
