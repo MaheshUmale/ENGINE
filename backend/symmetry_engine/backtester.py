@@ -277,14 +277,19 @@ class Backtester:
                             if can_trade:
                                 # Override execution to use backtest session
                                 bt_session = self.get_backtest_session()
-                                # Temporarily monkey-patch get_session for execution
+                                # Temporarily monkey-patch get_session for execution and strategy
                                 import symmetry_engine.execution as exe_mod
-                                original_get_session = exe_mod.get_session
+                                import symmetry_engine.strategy as strat_mod
+                                orig_exe_sess = exe_mod.get_session
+                                orig_strat_sess = strat_mod.get_session
+
                                 exe_mod.get_session = self.get_backtest_session
+                                strat_mod.get_session = self.get_backtest_session
                                 try:
                                     self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx'])
                                 finally:
-                                    exe_mod.get_session = original_get_session
+                                    exe_mod.get_session = orig_exe_sess
+                                    strat_mod.get_session = orig_strat_sess
                                     bt_session.close()
 
                         session = self.get_backtest_session()
@@ -314,12 +319,17 @@ class Backtester:
                         exit_price = ce_data['ltp'] if pos['side'] == 'BUY_CE' else pe_data['ltp']
 
                         import symmetry_engine.execution as exe_mod
-                        original_get_session = exe_mod.get_session
+                        import symmetry_engine.strategy as strat_mod
+                        orig_exe_sess = exe_mod.get_session
+                        orig_strat_sess = strat_mod.get_session
+
                         exe_mod.get_session = self.get_backtest_session
+                        strat_mod.get_session = self.get_backtest_session
                         try:
                             trade = self.execution.close_position(self.index_name, exit_price, timestamp=current_time, index_price=current['close_idx'])
                         finally:
-                            exe_mod.get_session = original_get_session
+                            exe_mod.get_session = orig_exe_sess
+                            strat_mod.get_session = orig_strat_sess
 
                         if trade:
                             self.strategy.reset_trailing_sl()

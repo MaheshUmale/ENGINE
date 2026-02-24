@@ -772,7 +772,7 @@ async def run_backtest_api(request: Request):
 
         # Generate Report from the specific backtest DB
         session = bt.get_backtest_session()
-        trades = session.query(Trade).filter(Trade.status == 'CLOSED').order_by(Trade.timestamp.asc()).all()
+        trades = session.query(Trade).filter(Trade.status == 'CLOSED', Trade.side == 'SELL').order_by(Trade.timestamp.asc()).all()
 
         trade_list = []
         equity_data = []
@@ -852,7 +852,8 @@ async def get_symmetry_trades():
 async def get_symmetry_stats():
     session = get_session()
     try:
-        closed_trades = session.query(Trade).filter(Trade.status == 'CLOSED').all()
+        # Only use 'SELL' trades for stats to avoid doubling PnL (pnl is set on both BUY and SELL records in current paper engine)
+        closed_trades = session.query(Trade).filter(Trade.status == 'CLOSED', Trade.side == 'SELL').all()
         if not closed_trades:
             return {"total_pnl": 0, "trade_count": 0, "win_rate": 0, "max_drawdown": 0, "sharpe_ratio": 0, "avg_pnl": 0}
 
