@@ -306,10 +306,13 @@ class TradingBot:
                 combined = combined.sort_values('timestamp').ffill().fillna(0)
 
                 # 5m aggregation for warmup
-                combined_5m = combined.resample('5min', on='timestamp').agg({
-                    'open_idx': 'first', 'high_idx': 'max', 'low_idx': 'min', 'close_idx': 'last',
-                    'close_ce': 'last', 'close_pe': 'last'
-                }).dropna()
+                agg_dict = {
+                    'open_idx': 'first', 'high_idx': 'max', 'low_idx': 'min', 'close_idx': 'last'
+                }
+                if 'close_ce' in combined.columns: agg_dict['close_ce'] = 'last'
+                if 'close_pe' in combined.columns: agg_dict['close_pe'] = 'last'
+
+                combined_5m = combined.resample('5min', on='timestamp').agg(agg_dict).dropna()
 
                 for _, row in combined_5m.iterrows():
                     engine.update_candle(details['index'], {

@@ -6,6 +6,8 @@
     <title>PRODESK | Symmetry Engine</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,800&display=swap');
         :root {
@@ -41,6 +43,21 @@
     </header>
 
     <main class="flex-1 overflow-y-auto p-4 space-y-4">
+        <!-- Main Price Chart Section -->
+        <div class="glass-panel p-5 rounded-3xl h-[500px]">
+            <div class="flex justify-between items-center mb-6">
+                <div class="flex items-center gap-4">
+                    <div class="text-[10px] font-black text-blue-500 uppercase tracking-widest">Live Execution Map</div>
+                    <select id="index-selector" class="bg-white/5 border border-white/10 rounded px-2 py-1 text-[10px] font-bold text-gray-400 outline-none">
+                        <option value="NSE:NIFTY">NIFTY 50</option>
+                        <option value="NSE:BANKNIFTY">NIFTY BANK</option>
+                    </select>
+                </div>
+                <div class="text-[8px] font-bold text-gray-500 uppercase italic">Index Spot with Bot Markers & Reference Levels</div>
+            </div>
+            <div id="price-chart" class="w-full h-[400px]"></div>
+        </div>
+
         <!-- Summary Stats -->
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <div class="glass-panel p-4 rounded-2xl stat-card">
@@ -116,6 +133,143 @@
     </main>
 
     <script>
+        let priceChart, mainSeries, volumeSeries, socket;
+        let currentSymbol = 'NSE:NIFTY';
+        let markers = [];
+        let priceLines = {};
+
+        function initPriceChart() {
+            const container = document.getElementById('price-chart');
+            priceChart = LightweightCharts.createChart(container, {
+                layout: { background: { type: 'solid', color: '#0f172a' }, textColor: '#d1d5db' },
+                grid: {
+                    vertLines: { color: 'rgba(255,255,255,0.05)' },
+                    horzLines: { color: 'rgba(255,255,255,0.05)' }
+                },
+                timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(255,255,255,0.1)' },
+                rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
+                crosshair: { mode: 0 }
+            });
+
+            mainSeries = priceChart.addCandlestickSeries({ upColor: '#22c55e', downColor: '#ef4444' });
+            volumeSeries = priceChart.addHistogramSeries({
+                priceFormat: { type: 'volume' },
+                priceScaleId: 'volume',
+            });
+            priceChart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 }, visible: false });
+
+            window.addEventListener('resize', () => {
+                priceChart.resize(container.clientWidth, container.clientHeight);
+            });
+        }
+
+        async function fetchHistory(symbol) {
+            try {
+                const res = await fetch(`/api/tv/intraday/${encodeURIComponent(symbol)}?interval=1`);
+                const data = await res.json();
+                if (data && data.candles) {
+                    const candles = data.candles.map(c => ({
+                        time: Number(c[0]), open: c[1], high: c[2], low: c[3], close: c[4]
+                    }));
+                    mainSeries.setData(candles);
+
+                    const volumes = data.candles.map(c => ({
+                        time: Number(c[0]), value: c[5],
+                        color: c[4] >= c[1] ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'
+                    }));
+                    volumeSeries.setData(volumes);
+
+                    if (data.indicators) {
+                        applyIndicators(data.indicators);
+                    }
+                    priceChart.timeScale().fitContent();
+                }
+            } catch (e) {
+                console.error("Failed to fetch history", e);
+            }
+        }
+
+        function applyIndicators(indicators) {
+            markers = [];
+            Object.values(priceLines).forEach(lines => lines.forEach(l => mainSeries.removePriceLine(l)));
+            priceLines = {};
+
+            indicators.forEach(ind => {
+                if (ind.type === 'markers') {
+                    ind.data.forEach(m => {
+                        markers.push({
+                            time: Number(m.time),
+                            position: m.position,
+                            color: m.color,
+                            shape: m.shape,
+                            text: m.text
+                        });
+                    });
+                } else if (ind.type === 'price_lines') {
+                    priceLines[ind.id] = ind.data.map(l => mainSeries.createPriceLine({
+                        price: l.price,
+                        color: l.color,
+                        lineWidth: l.width || 1,
+                        lineStyle: 2,
+                        axisLabelVisible: true,
+                        title: l.title
+                    }));
+                }
+            });
+            markers.sort((a, b) => a.time - b.time);
+            mainSeries.setMarkers(markers);
+        }
+
+        function setupSocket() {
+            socket = io();
+            socket.on('connect', () => {
+                console.log("Socket connected");
+                socket.emit('subscribe', { instrumentKeys: [currentSymbol], interval: '1' });
+            });
+
+            socket.on('raw_tick', (data) => {
+                if (data[currentSymbol]) {
+                    const tick = data[currentSymbol];
+                    const ts = Math.floor(tick.ts_ms / 1000);
+                    const candleTime = ts - (ts % 60);
+
+                    mainSeries.update({
+                        time: candleTime,
+                        open: tick.last_price,
+                        high: tick.last_price,
+                        low: tick.last_price,
+                        close: tick.last_price
+                    });
+                }
+            });
+
+            socket.on('chart_update', (data) => {
+                if (data.instrumentKey === currentSymbol) {
+                    if (data.ohlcv) {
+                        data.ohlcv.forEach(c => {
+                            mainSeries.update({
+                                time: Number(c[0]), open: c[1], high: c[2], low: c[3], close: c[4]
+                            });
+                        });
+                    }
+                    if (data.indicators) {
+                        applyIndicators(data.indicators);
+                    }
+                }
+            });
+        }
+
+        document.getElementById('index-selector').addEventListener('change', (e) => {
+            if (socket) socket.emit('unsubscribe', { instrumentKeys: [currentSymbol], interval: '1' });
+            currentSymbol = e.target.value;
+            if (socket) socket.emit('subscribe', { instrumentKeys: [currentSymbol], interval: '1' });
+            fetchHistory(currentSymbol);
+        });
+
+        initPriceChart();
+        fetchHistory(currentSymbol);
+        setupSocket();
+
         async function refreshData() {
             try {
                 const [tradesResp, signalsResp, statsResp] = await Promise.all([
@@ -140,7 +294,7 @@
 
         function updateStats(stats) {
             document.getElementById('stat-pnl').innerText = stats.total_pnl.toFixed(2);
-            document.getElementById('stat-pnl').className = `text-xl font-black \${stats.total_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`;
+            document.getElementById('stat-pnl').className = `text-xl font-black ${stats.total_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`;
             document.getElementById('stat-trades').innerText = stats.trade_count;
             document.getElementById('stat-winrate').innerText = stats.win_rate.toFixed(1) + '%';
             document.getElementById('stat-dd').innerText = stats.max_drawdown.toFixed(2);
@@ -153,22 +307,22 @@
             if (!body) return;
             body.innerHTML = trades.map(t => `
                 <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
-                    <td class="p-4 text-gray-400 font-mono text-[10px]">\${new Date(t.timestamp).toLocaleString()}</td>
+                    <td class="p-4 text-gray-400 font-mono text-[10px]">${new Date(t.timestamp).toLocaleString()}</td>
                     <td class="p-4">
                         <div class="flex flex-col">
-                            <span class="text-white">\${t.index}</span>
-                            <span class="text-[8px] text-gray-500 font-normal uppercase tracking-tighter">\${t.instrument}</span>
+                            <span class="text-white">${t.index}</span>
+                            <span class="text-[8px] text-gray-500 font-normal uppercase tracking-tighter">${t.instrument}</span>
                         </div>
                     </td>
                     <td class="p-4">
-                        <span class="px-2 py-1 rounded text-[9px] font-black tracking-widest \${t.side === 'BUY' ? 'bg-green-500/20 text-green-500' : 'bg-yellow-500/20 text-yellow-500'}">
-                            \${t.side}
+                        <span class="px-2 py-1 rounded text-[9px] font-black tracking-widest ${t.side === 'BUY' ? 'bg-green-500/20 text-green-500' : 'bg-yellow-500/20 text-yellow-500'}">
+                            ${t.side}
                         </span>
                     </td>
-                    <td class="p-4 font-mono text-right">\${t.price.toFixed(2)}</td>
-                    <td class="p-4 text-right font-black \${t.pnl > 0 ? 'text-green-500' : t.pnl < 0 ? 'text-red-500' : 'text-gray-600'}">\${t.pnl ? t.pnl.toFixed(2) : '-'}</td>
+                    <td class="p-4 font-mono text-right">${t.price.toFixed(2)}</td>
+                    <td class="p-4 text-right font-black ${t.pnl > 0 ? 'text-green-500' : t.pnl < 0 ? 'text-red-500' : 'text-gray-600'}">${t.pnl ? t.pnl.toFixed(2) : '-'}</td>
                     <td class="p-4">
-                         <span class="text-[9px] uppercase tracking-tighter \${t.status === 'CLOSED' ? 'text-gray-500' : 'text-blue-500 animate-pulse'}"">\${t.status}</span>
+                         <span class="text-[9px] uppercase tracking-tighter ${t.status === 'CLOSED' ? 'text-gray-500' : 'text-blue-500 animate-pulse'}">${t.status}</span>
                     </td>
                 </tr>
             `).join('');
@@ -191,24 +345,24 @@
                 <div class="p-4 rounded-2xl border border-white/5 bg-white/5 hover:bg-white/[0.08] transition-all">
                     <div class="flex justify-between items-start mb-2">
                         <div>
-                            <span class="text-[11px] font-black \${s.side === 'BUY_CE' ? 'text-green-500' : 'text-red-500'} uppercase tracking-widest">\${s.side}</span>
-                            <span class="ml-2 text-[9px] text-white font-mono">\${s.index} @ \${s.price.toFixed(2)}</span>
+                            <span class="text-[11px] font-black ${s.side === 'BUY_CE' ? 'text-green-500' : 'text-red-500'} uppercase tracking-widest">${s.side}</span>
+                            <span class="ml-2 text-[9px] text-white font-mono">${s.index} @ ${s.price.toFixed(2)}</span>
                         </div>
-                        <span class="text-[8px] text-gray-500 font-mono">\${new Date(s.timestamp).toLocaleTimeString()}</span>
+                        <span class="text-[8px] text-gray-500 font-mono">${new Date(s.timestamp).toLocaleTimeString()}</span>
                     </div>
                     <div class="flex flex-wrap gap-1.5 mb-2">
-                        \${tags}
+                        ${tags}
                     </div>
                     <div class="flex justify-between items-center">
                          <div class="text-[8px] font-black text-gray-400 uppercase tracking-tighter">Confluence Score</div>
                          <div class="flex gap-1">
-                             \${Array.from({length: 4}).map((_, i) => \`
-                                 <div class="w-2.5 h-1 rounded-full \${i < s.score ? (s.side === 'BUY_CE' ? 'bg-green-500' : 'bg-red-500') : 'bg-white/10'}"></div>
-                             \`).join('')}
+                             ${Array.from({length: 4}).map((_, i) => `
+                                 <div class="w-2.5 h-1 rounded-full ${i < s.score ? (s.side === 'BUY_CE' ? 'bg-green-500' : 'bg-red-500') : 'bg-white/10'}"></div>
+                             `).join('')}
                          </div>
                     </div>
                 </div>
-            \`}).join('');
+            `;}).join('');
         }
 
         function renderEquityChart(trades) {
