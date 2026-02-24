@@ -51,11 +51,11 @@ This document centralizes all requirements for the ProDesk Trading Terminal, syn
 ---
 
 ## 7. Remaining Items & Upgrades [TODO]
-- [ ] **Paper Trading Persistence**: Ensure paper trades survive server restarts (currently in memory/local DB but needs robust state recovery).
+- [x] **Paper Trading Persistence**: Ensure paper trades survive server restarts (implemented robust state recovery for positions and trailing SL).
 - [ ] **ML-Based IV Prediction**: Integrate a light LSTM model for short-term IV volatility forecasting.
 - [ ] **Portfolio Greeks**: Combined Greeks tracking for multi-symbol portfolios.
 - [ ] **Mobile App PWA**: Transform the dashboard into a Progressive Web App for better mobile experience.
-- [ ] **Advanced Backtest Engine**: GUI-based backtesting tool to test symmetry parameters without code.
+- [x] **Advanced Backtest Engine**: GUI-based backtesting tool to test symmetry parameters without code.
 - [ ] **Automated Order Execution**: Direct integration with broker APIs (Zerodha/Dhan/Upstox) for live trading (disabled by default).
 - [ ] **Multi-Leg Basket Orders**: One-click execution for complex strategy builder layouts.
-- [ ] **Custom Indicator Scripting**: Allow users to write simple JavaScript indicators for the main chart.
+- [x] **Custom Indicator Scripting**: Allow users to write simple JavaScript indicators for the main chart.

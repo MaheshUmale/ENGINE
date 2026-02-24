@@ -13,6 +13,11 @@ class StrategyEngine:
         self.candle_history_5m = {} # instrument_key -> list of last 10 5m candles
         self.trailing_sl = {} # index_name -> current_sl_price
 
+        # Strategy Parameters (can be overridden)
+        self.swing_window = SWING_WINDOW
+        self.confluence_threshold = CONFLUENCE_THRESHOLD
+        self.atr_multiplier = 1.5 # Default multiplier for SL
+
     def update_data(self, instrument_key, data):
         """Update current tick data."""
         self.current_data[instrument_key] = data
@@ -32,9 +37,11 @@ class StrategyEngine:
         if len(target_history[instrument_key]) > limit:
             target_history[instrument_key].pop(0)
 
-    def calculate_atr(self, instrument_key, period=14):
+    def calculate_atr(self, instrument_key=None, period=14, history=None):
         """Calculate Average True Range."""
-        history = self.candle_history.get(instrument_key, [])
+        if history is None:
+            history = self.candle_history.get(instrument_key, [])
+
         if len(history) < period + 1:
             return 0
 
@@ -79,6 +86,14 @@ class StrategyEngine:
         Identify Significant Swings where a 'Wall' exists.
         Enhanced: Hits a New High/Low and confirms with 2-candle pullback + ATR filter.
         """
+        if isinstance(candles, list):
+            if len(candles) < 10: return None
+
+            # Use pandas for consistency if window is large or complex logic is needed,
+            # but for 20 candles, manual is fine. Let's stick to consistent logic.
+            df = pd.DataFrame(candles)
+            return self.identify_swing(df)
+
         if len(candles) < 10:
             return None
 
@@ -87,7 +102,7 @@ class StrategyEngine:
         atr_threshold = atr * 0.5 if atr > 0 else 0
 
         # Simple swing detection: local high/low in the window
-        last_n = candles.tail(SWING_WINDOW)
+        last_n = candles.tail(self.swing_window)
         current_high = last_n['high'].max()
         current_low = last_n['low'].min()
 
@@ -192,7 +207,7 @@ class StrategyEngine:
             if idx_data.get('volume', 0) > 0:
                 details['volume_active'] = True
 
-            if score >= CONFLUENCE_THRESHOLD:
+            if score >= self.confluence_threshold:
                 # Check MTF Confirmation
                 if not self.check_mtf_confirmation('Bullish', idx_key):
                     return None
@@ -239,7 +254,7 @@ class StrategyEngine:
             if idx_data.get('volume', 0) > 0:
                 details['volume_active'] = True
 
-            if score >= CONFLUENCE_THRESHOLD:
+            if score >= self.confluence_threshold:
                 # Check MTF Confirmation
                 if not self.check_mtf_confirmation('Bearish', idx_key):
                     return None
@@ -272,10 +287,10 @@ class StrategyEngine:
             if atr > 0:
                 # Initialize or update trailing SL
                 if self.index_name not in self.trailing_sl:
-                    self.trailing_sl[self.index_name] = entry_price - (1.5 * atr)
+                    self.trailing_sl[self.index_name] = entry_price - (self.atr_multiplier * atr)
 
                 # Update trailing SL (only moves up)
-                new_sl = active_opt_data['ltp'] - (1.5 * atr)
+                new_sl = active_opt_data['ltp'] - (self.atr_multiplier * atr)
                 if new_sl > self.trailing_sl[self.index_name]:
                     self.trailing_sl[self.index_name] = new_sl
 

@@ -56,12 +56,15 @@ class Trade(Base):
     timestamp = Column(DateTime)
     index_name = Column(String)
     instrument_key = Column(String)
+    instrument_ce = Column(String)
+    instrument_pe = Column(String)
     side = Column(String)  # 'BUY' or 'SELL'
     price = Column(Float)
     index_price = Column(Float)
     quantity = Column(Integer)
     status = Column(String)  # 'OPEN', 'CLOSED'
     pnl = Column(Float, default=0.0)
+    trailing_sl = Column(Float, default=0.0)
 
 class Notification(Base):
     __tablename__ = 'notifications'
