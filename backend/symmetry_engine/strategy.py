@@ -4,8 +4,9 @@ from .database import get_session, ReferenceLevel, Signal, RawTick
 from .config import SWING_WINDOW, CONFLUENCE_THRESHOLD
 
 class StrategyEngine:
-    def __init__(self, index_name):
+    def __init__(self, index_name, session_factory=None):
         self.index_name = index_name
+        self.get_session = session_factory or get_session
         self.reference_levels = {'High': None, 'Low': None}
         self.positions = []
         self.current_data = {} # instrument_key -> latest_data (tick)
@@ -426,7 +427,7 @@ class StrategyEngine:
         return True
 
     def save_reference_level(self, level_type, index_price, ce_price, pe_price, ce_key, pe_key, timestamp=None):
-        session = get_session()
+        session = self.get_session()
         ref = ReferenceLevel(
             timestamp=timestamp if timestamp else datetime.datetime.utcnow(),
             index_name=self.index_name,

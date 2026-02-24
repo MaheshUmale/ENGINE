@@ -112,6 +112,7 @@ class ChartInstance {
         this.showOIProfile = false;
         this.showIndicators = true; // Enabled by default
         this.oiLines = [];
+        this.oiData = null;
         this.activeSymmetrySignal = null;
         this.customIndicatorSeries = null;
 
@@ -171,7 +172,23 @@ class ChartInstance {
         this.chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 }, visible: false });
 
         this.container.addEventListener('mousedown', () => this.engine.setActiveChart(this.index));
+
+        // OI Profile Canvas Overlay
+        this.oiCanvas = document.createElement('canvas');
+        this.oiCanvas.className = 'oi-profile-canvas';
+        this.oiCanvas.style.position = 'absolute';
+        this.oiCanvas.style.top = '0';
+        this.oiCanvas.style.right = '0';
+        this.oiCanvas.style.pointerEvents = 'none';
+        this.oiCanvas.style.zIndex = '5';
+        this.container.parentElement.appendChild(this.oiCanvas);
+
         this.addLocalControls();
+
+        // Sync OI Profile with chart changes
+        this.chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+            if (this.showOIProfile) this.renderOIProfile();
+        });
 
         // Horizontal line drawing support (Shift+Click)
         this.chart.subscribeClick((param) => {
@@ -217,6 +234,7 @@ class ChartInstance {
         this.indicatorSeries = this.indicatorSeries || {};
         Object.values(this.indicatorSeries).forEach(s => this.chart.removeSeries(s));
         this.indicatorSeries = {};
+        this.oiData = null;
 
         this.engine.setLoading(true);
         const data = await this.engine.dataManager.fetchHistory(this.symbol, this.interval);
@@ -586,45 +604,102 @@ class ChartInstance {
 
     async toggleOIProfile(visible) {
         this.showOIProfile = visible;
-        this.oiLines.forEach(l => this.mainSeries.removePriceLine(l));
-        this.oiLines = [];
-
         if (visible) {
+            this.engine.setLoading(true);
             const data = await this.engine.dataManager.fetchOIProfile(this.symbol);
-            if (data && data.chain && data.spot_price) {
-                const spot = data.spot_price;
-                const strikes = [...new Set(data.chain.map(c => c.strike))].sort((a, b) => a - b);
-
-                let atmIdx = 0;
-                let minDiff = Infinity;
-                strikes.forEach((s, i) => {
-                    const diff = Math.abs(s - spot);
-                    if (diff < minDiff) { minDiff = diff; atmIdx = i; }
-                });
-
-                const start = Math.max(0, atmIdx - 10);
-                const end = Math.min(strikes.length, atmIdx + 11);
-                const targetStrikes = strikes.slice(start, end);
-
-                targetStrikes.forEach(strike => {
-                    const call = data.chain.find(c => c.strike === strike && c.option_type === 'call');
-                    const put = data.chain.find(c => c.strike === strike && c.option_type === 'put');
-
-                    if (call && call.oi > 0) {
-                        this.oiLines.push(this.mainSeries.createPriceLine({
-                            price: strike, color: 'rgba(239, 68, 68, 0.4)', lineWidth: 1, lineStyle: 0,
-                            axisLabelVisible: true, title: `C-OI: ${(call.oi/1000000).toFixed(1)}M`
-                        }));
-                    }
-                    if (put && put.oi > 0) {
-                        this.oiLines.push(this.mainSeries.createPriceLine({
-                            price: strike, color: 'rgba(34, 197, 94, 0.4)', lineWidth: 1, lineStyle: 0,
-                            axisLabelVisible: true, title: `P-OI: ${(put.oi/1000000).toFixed(1)}M`
-                        }));
-                    }
-                });
+            this.engine.setLoading(false);
+            if (data && data.chain) {
+                this.oiData = data;
+                this.renderOIProfile();
             }
+        } else {
+            this.clearOIProfile();
         }
+    }
+
+    renderOIProfile() {
+        if (!this.showOIProfile || !this.oiData) {
+            this.clearOIProfile();
+            return;
+        }
+
+        const canvas = this.oiCanvas;
+        const ctx = canvas.getContext('2d');
+        const width = this.container.clientWidth;
+        const height = this.container.clientHeight;
+
+        if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
+        }
+        ctx.clearRect(0, 0, width, height);
+
+        const data = this.oiData;
+        const strikes = [...new Set(data.chain.map(c => c.strike))].sort((a, b) => a - b);
+
+        // Filter strikes to visible range to optimize and find local max
+        let maxOI = 0;
+        const strikesInRange = [];
+
+        strikes.forEach(s => {
+            const y = this.mainSeries.priceToCoordinate(s);
+            if (y !== null && y >= 0 && y <= height) {
+                const call = data.chain.find(c => c.strike === s && c.option_type === 'call') || {oi: 0};
+                const put = data.chain.find(c => c.strike === s && c.option_type === 'put') || {oi: 0};
+                maxOI = Math.max(maxOI, call.oi, put.oi);
+                strikesInRange.push({ strike: s, y, call: call.oi, put: put.oi });
+            }
+        });
+
+        if (maxOI === 0) return;
+
+        const maxBarWidth = width * 0.3; // 30% of chart width
+        const barHeight = 6;
+
+        strikesInRange.forEach(item => {
+            const { y, call, put } = item;
+            const base = Math.min(call, put);
+            const delta = Math.abs(call - put);
+            const isCallHeavier = call > put;
+
+            const baseLen = (base / maxOI) * maxBarWidth;
+            const deltaLen = (delta / maxOI) * maxBarWidth;
+
+            // Draw Base Bar (Common OI)
+            ctx.fillStyle = 'rgba(148, 163, 184, 0.2)'; // Gray muted
+            ctx.fillRect(width - baseLen, y - barHeight/2, baseLen, barHeight);
+
+            // Draw Delta Bar (Prominent difference)
+            ctx.fillStyle = isCallHeavier ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.8)';
+            ctx.fillRect(width - baseLen - deltaLen, y - barHeight/2, deltaLen, barHeight);
+
+            // Boundary line between base and delta
+            if (delta > 0 && base > 0) {
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(width - baseLen, y - barHeight/2);
+                ctx.lineTo(width - baseLen, y + barHeight/2);
+                ctx.stroke();
+            }
+
+            // Labels
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = 'bold 8px Arial';
+            ctx.textAlign = 'right';
+            const totalM = ((call + put) / 1000000).toFixed(1);
+            const deltaM = (delta / 1000000).toFixed(1);
+
+            if (deltaLen > 20) {
+                ctx.fillText(`${deltaM}M Δ`, width - baseLen - deltaLen - 5, y + 3);
+            }
+        });
+    }
+
+    clearOIProfile() {
+        const ctx = this.oiCanvas.getContext('2d');
+        ctx.clearRect(0, 0, this.oiCanvas.width, this.oiCanvas.height);
+        this.oiData = null;
     }
 
     addLocalControls() {
@@ -932,7 +1007,10 @@ class MultiChartEngine {
         this.setupSearch();
         this.loadLayout();
         window.addEventListener('resize', () => {
-            this.charts.forEach(c => c.chart.resize(c.container.clientWidth, c.container.clientHeight));
+            this.charts.forEach(c => {
+                c.chart.resize(c.container.clientWidth, c.container.clientHeight);
+                if (c.showOIProfile) c.renderOIProfile();
+            });
         });
     }
 

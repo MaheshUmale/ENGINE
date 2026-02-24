@@ -41,6 +41,7 @@ This document centralizes all requirements for the ProDesk Trading Terminal, syn
 - [x] **Orderflow Chart**: specialized tick-based and renko visualization.
 - [x] **Signal Markers**: Automated marking of buy/sell signals, SL, and TP levels directly on charts.
 - [x] **Alert System**: Threshold-based notifications for Price, OI, and PCR events.
+- [x] **OI Profile Overlay**: Enhanced horizontal bars on index charts with 'Base + Delta' visualization to emphasize Put/Call differences.
 
 ## 6. Optimization & Security [COMPLETED]
 - [x] **Thread-Safe Processing**: Offloading heavy I/O and analysis to background threads using `asyncio.to_thread`.

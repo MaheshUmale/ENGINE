@@ -90,6 +90,10 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing ProTrade Terminal Services...")
     global main_loop
 
+    # Initialize Symmetry Database early to avoid race conditions
+    from symmetry_engine.database import init_db
+    init_db()
+
     # Sync instruments from Upstox in the background
     from core.instrument_manager import instrument_manager
     asyncio.create_task(instrument_manager.fetch_and_store_instruments())
@@ -772,7 +776,8 @@ async def run_backtest_api(request: Request):
 
         # Generate Report from the specific backtest DB
         session = bt.get_backtest_session()
-        trades = session.query(Trade).filter(Trade.status == 'CLOSED', Trade.side == 'SELL').order_by(Trade.timestamp.asc()).all()
+        # Query BUY trades that are CLOSED, as they contain entry_price, exit_price and pnl
+        trades = session.query(Trade).filter(Trade.status == 'CLOSED', Trade.side == 'BUY').order_by(Trade.timestamp.asc()).all()
 
         trade_list = []
         equity_data = []
@@ -784,11 +789,9 @@ async def run_backtest_api(request: Request):
                 "timestamp": t.timestamp.isoformat(),
                 "index": t.index_name,
                 "instrument": t.instrument_key,
-                "price": t.price, # This is the exit price for SELL trades in current schema?
-                                  # Wait, ExecutionEngine.close_position creates a new Trade with side='SELL'
-                "pnl": t.pnl,
-                # For the log, we want to show entry and exit prices
-                "exit_price": t.price
+                "price": t.price, # Used as entry price in GUI
+                "exit_price": t.exit_price,
+                "pnl": t.pnl
             })
             equity_data.append({"time": t.timestamp, "pnl": cum_pnl})
 

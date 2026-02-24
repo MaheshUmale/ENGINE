@@ -11,6 +11,7 @@ This list tracks the remaining features and planned upgrades for the ProDesk Tra
 - [ ] **Portfolio-Level Greeks**: Add a new tab in the Options Dashboard to track aggregate Delta, Theta, and Vega exposure across all open positions.
 - [x] **Custom Indicator Builder**: Create a UI-based indicator builder allowing users to define custom confluence rules using price, volume, and OI data (Implemented JavaScript-based scripting).
 - [x] **Historical Strategy Optimizer**: A tool to automatically find the best Symmetry parameters (ATR multiplier, pullback depth) for a specific symbol over the last 30 days (GUI-based Backtester implemented).
+- [x] **Enhanced OI Profile**: High-performance Canvas-based OI Profile on index charts with delta-focused visualization.
 
 ## 🔵 Priority: Low (Features & UX)
 - [ ] **PWA Conversion**: Add a manifest and service worker to make the terminal installable as a mobile app.
