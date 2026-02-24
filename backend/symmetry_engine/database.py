@@ -82,12 +82,42 @@ class AppSetting(Base):
 engine = create_engine(f'sqlite:///{DB_PATH}')
 Session = sessionmaker(bind=engine)
 
+def migrate_db():
+    """
+    Manually add missing columns to the trades table if they don't exist.
+    SqlAlchemy create_all doesn't handle migrations.
+    """
+    from sqlalchemy import text
+    try:
+        with engine.begin() as conn:
+            # Check for columns in trades table
+            res = conn.execute(text("PRAGMA table_info(trades)"))
+            columns = [row[1] for row in res]
+
+            required_columns = {
+                'instrument_ce': 'VARCHAR',
+                'instrument_pe': 'VARCHAR',
+                'exit_price': 'FLOAT DEFAULT 0.0',
+                'trailing_sl': 'FLOAT DEFAULT 0.0'
+            }
+
+            for col, col_type in required_columns.items():
+                if col not in columns:
+                    print(f"Migration: Adding missing column {col} to trades table...")
+                    conn.execute(text(f"ALTER TABLE trades ADD COLUMN {col} {col_type}"))
+    except Exception as e:
+        print(f"Migration Error: {e}")
+
 def init_db():
     import os
     db_dir = os.path.dirname(DB_PATH)
     if db_dir and not os.path.exists(db_dir):
         os.makedirs(db_dir, exist_ok=True)
     Base.metadata.create_all(engine)
+    try:
+        migrate_db()
+    except Exception as e:
+        print(f"Migration failed: {e}")
 
 def get_session():
     return Session()

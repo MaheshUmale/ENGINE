@@ -90,6 +90,10 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing ProTrade Terminal Services...")
     global main_loop
 
+    # Initialize Symmetry Database early to avoid race conditions
+    from symmetry_engine.database import init_db
+    init_db()
+
     # Sync instruments from Upstox in the background
     from core.instrument_manager import instrument_manager
     asyncio.create_task(instrument_manager.fetch_and_store_instruments())
