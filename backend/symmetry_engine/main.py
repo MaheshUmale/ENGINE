@@ -12,8 +12,8 @@ from .database import init_db, get_session, RawTick, Candle
 class TradingBot:
     def __init__(self, loop=None):
         self.data_provider = DataProvider(ACCESS_TOKEN)
-        self.engines = {name: StrategyEngine(name) for name in INDICES}
-        self.execution = ExecutionEngine()
+        self.engines = {name: StrategyEngine(name, session_factory=get_session) for name in INDICES}
+        self.execution = ExecutionEngine(session_factory=get_session)
         self.risk_manager = RiskManager()
         self.alert_manager = AlertManager()
         self.instruments = {}
@@ -70,8 +70,6 @@ class TradingBot:
             engine.update_candle(key, buffer.copy())
 
             if key == instruments['index']:
-                candle_df = pd.DataFrame([buffer])
-
                 # Use a background thread for non-critical DB operations
                 def db_ops():
                     session = get_session()

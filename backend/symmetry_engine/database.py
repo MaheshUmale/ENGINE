@@ -64,6 +64,7 @@ class Trade(Base):
     quantity = Column(Integer)
     status = Column(String)  # 'OPEN', 'CLOSED'
     pnl = Column(Float, default=0.0)
+    exit_price = Column(Float, default=0.0)
     trailing_sl = Column(Float, default=0.0)
 
 class Notification(Base):

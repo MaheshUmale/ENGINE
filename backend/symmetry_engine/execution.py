@@ -3,7 +3,8 @@ from .config import INDICES
 import datetime
 
 class ExecutionEngine:
-    def __init__(self, initial_balance=1000000, slippage=0.001, commission_rate=0.0005, fixed_charge=20):
+    def __init__(self, session_factory=None, initial_balance=1000000, slippage=0.001, commission_rate=0.0005, fixed_charge=20):
+        self.get_session = session_factory or get_session
         self.balance = initial_balance
         self.slippage = slippage # 0.1% default
         self.commission_rate = commission_rate # 0.05%
@@ -14,7 +15,7 @@ class ExecutionEngine:
         """
         Recovers open positions from the database on startup.
         """
-        session = get_session()
+        session = self.get_session()
         try:
             open_trades = session.query(Trade).filter_by(status='OPEN').all()
             for trade in open_trades:
@@ -53,7 +54,7 @@ class ExecutionEngine:
         entry_cost = (entry_price * quantity * self.commission_rate) + self.fixed_charge
         self.balance -= entry_cost
 
-        session = get_session()
+        session = self.get_session()
         ts = timestamp if timestamp else (signal.timestamp if signal.timestamp else datetime.datetime.utcnow())
         trade = Trade(
             timestamp=ts,
@@ -77,7 +78,8 @@ class ExecutionEngine:
             'entry_price': signal.option_price,
             'quantity': quantity,
             'ce_key': signal.details.get('ce_key'),
-            'pe_key': signal.details.get('pe_key')
+            'pe_key': signal.details.get('pe_key'),
+            'trailing_sl': 0.0
         }
 
         print(f"Executed BUY for {signal.index_name}: {signal.side} at {signal.option_price}")
@@ -95,7 +97,7 @@ class ExecutionEngine:
         pos['trailing_sl'] = new_sl
 
         def do_update():
-            session = get_session()
+            session = self.get_session()
             try:
                 trade = session.query(Trade).filter_by(id=pos['trade_id']).first()
                 if trade:
@@ -107,8 +109,12 @@ class ExecutionEngine:
             finally:
                 session.close()
 
-        import asyncio
-        asyncio.create_task(asyncio.to_thread(do_update))
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(asyncio.to_thread(do_update))
+        except RuntimeError:
+            # No running loop, perform update synchronously
+            do_update()
 
     def close_position(self, index_name, current_price, timestamp=None, index_price=None):
         """
@@ -118,7 +124,7 @@ class ExecutionEngine:
             return None
 
         pos = self.positions.pop(index_name)
-        session = get_session()
+        session = self.get_session()
         trade = session.query(Trade).filter_by(id=pos['trade_id']).first()
 
         # Apply slippage to exit price
@@ -144,6 +150,7 @@ class ExecutionEngine:
 
         trade.status = 'CLOSED'
         trade.pnl = exit_trade.pnl
+        trade.exit_price = exit_price
 
         session.add(exit_trade)
         session.commit()

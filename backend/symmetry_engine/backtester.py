@@ -11,8 +11,6 @@ class Backtester:
     def __init__(self, index_name, db_path=None):
         self.index_name = index_name
         self.data_provider = DataProvider()
-        self.engines = {name: StrategyEngine(name) for name in INDICES}
-        self.strategy = self.engines[index_name]
 
         # Use a separate database for backtest results to avoid destroying live data
         from .database import create_engine, sessionmaker, Base
@@ -24,7 +22,13 @@ class Backtester:
         self.Session = sessionmaker(bind=self.engine)
         Base.metadata.create_all(self.engine)
 
-        self.execution = ExecutionEngine()
+        def bt_session_factory():
+            return self.Session()
+
+        self.engines = {name: StrategyEngine(name, session_factory=bt_session_factory) for name in INDICES}
+        self.strategy = self.engines[index_name]
+
+        self.execution = ExecutionEngine(session_factory=bt_session_factory)
         self.risk_manager = RiskManager()
         self.params = {}
 
@@ -275,22 +279,7 @@ class Backtester:
                             # Risk Check
                             can_trade, _ = self.risk_manager.can_trade(len(self.execution.positions), timestamp=current_time)
                             if can_trade:
-                                # Override execution to use backtest session
-                                bt_session = self.get_backtest_session()
-                                # Temporarily monkey-patch get_session for execution and strategy
-                                import symmetry_engine.execution as exe_mod
-                                import symmetry_engine.strategy as strat_mod
-                                orig_exe_sess = exe_mod.get_session
-                                orig_strat_sess = strat_mod.get_session
-
-                                exe_mod.get_session = self.get_backtest_session
-                                strat_mod.get_session = self.get_backtest_session
-                                try:
-                                    self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx'])
-                                finally:
-                                    exe_mod.get_session = orig_exe_sess
-                                    strat_mod.get_session = orig_strat_sess
-                                    bt_session.close()
+                                self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx'])
 
                         session = self.get_backtest_session()
                         session.add(signal)
@@ -318,18 +307,7 @@ class Backtester:
                     if self.strategy.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data):
                         exit_price = ce_data['ltp'] if pos['side'] == 'BUY_CE' else pe_data['ltp']
 
-                        import symmetry_engine.execution as exe_mod
-                        import symmetry_engine.strategy as strat_mod
-                        orig_exe_sess = exe_mod.get_session
-                        orig_strat_sess = strat_mod.get_session
-
-                        exe_mod.get_session = self.get_backtest_session
-                        strat_mod.get_session = self.get_backtest_session
-                        try:
-                            trade = self.execution.close_position(self.index_name, exit_price, timestamp=current_time, index_price=current['close_idx'])
-                        finally:
-                            exe_mod.get_session = orig_exe_sess
-                            strat_mod.get_session = orig_strat_sess
+                        trade = self.execution.close_position(self.index_name, exit_price, timestamp=current_time, index_price=current['close_idx'])
 
                         if trade:
                             self.strategy.reset_trailing_sl()
