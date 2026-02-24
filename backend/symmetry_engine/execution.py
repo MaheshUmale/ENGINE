@@ -10,6 +10,39 @@ class ExecutionEngine:
         self.fixed_charge = fixed_charge # Flat INR 20 per trade
         self.positions = {} # index_name -> position
 
+    def recover_positions(self):
+        """
+        Recovers open positions from the database on startup.
+        """
+        session = get_session()
+        try:
+            open_trades = session.query(Trade).filter_by(status='OPEN').all()
+            for trade in open_trades:
+                self.positions[trade.index_name] = {
+                    'trade_id': trade.id,
+                    'side': trade.instrument_key, # signal.side was stored here
+                    'entry_price': trade.price / (1 + self.slippage), # Reverse slippage for internal tracking
+                    'quantity': trade.quantity
+                }
+
+                # Try to recover ce_key/pe_key from Signal table for monitoring
+                from .database import Signal
+                last_signal = session.query(Signal).filter_by(
+                    index_name=trade.index_name,
+                    side=trade.instrument_key
+                ).order_by(Signal.timestamp.desc()).first()
+
+                if last_signal and last_signal.details:
+                    self.positions[trade.index_name]['ce_key'] = last_signal.details.get('ce_key')
+                    self.positions[trade.index_name]['pe_key'] = last_signal.details.get('pe_key')
+
+            if self.positions:
+                print(f"State Recovery: Recovered {len(self.positions)} open positions.")
+        except Exception as e:
+            print(f"Error recovering positions: {e}")
+        finally:
+            session.close()
+
     def execute_signal(self, signal, timestamp=None, index_price=None):
         """
         Executes a signal by entering a paper trade.

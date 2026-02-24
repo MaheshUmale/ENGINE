@@ -184,6 +184,53 @@ class TradingBot:
                         f"<b>TRADE CLOSED</b>\nIndex: {index_name}\nPnL: {trade.pnl:.2f}"
                     ))
 
+    async def recover_state(self):
+        """
+        Recovers the complete bot state from database to handle server restarts.
+        """
+        print("State Recovery: Initializing...")
+
+        # 1. Recover positions and risk metrics
+        self.execution.recover_positions()
+        self.risk_manager.recover_pnl()
+
+        # 2. Recover StrategyEngine states (Reference Levels and Instruments)
+        session = get_session()
+        try:
+            from .database import ReferenceLevel
+            for index_name, engine in self.engines.items():
+                # Recover last known High and Low levels for today
+                today_sod = datetime.datetime.combine(datetime.date.today(), datetime.time.min)
+
+                for level_type in ['High', 'Low']:
+                    last_ref = session.query(ReferenceLevel).filter(
+                        ReferenceLevel.index_name == index_name,
+                        ReferenceLevel.type == level_type,
+                        ReferenceLevel.timestamp >= today_sod
+                    ).order_by(ReferenceLevel.timestamp.desc()).first()
+
+                    if last_ref:
+                        engine.reference_levels[level_type] = {
+                            'index_price': last_ref.index_price,
+                            'ce_price': last_ref.ce_price,
+                            'pe_price': last_ref.pe_price,
+                            'type': last_ref.type
+                        }
+                        # Also recover the instruments if not already discovered
+                        if index_name not in self.instruments:
+                            self.instruments[index_name] = {
+                                'index': INDICES[index_name]['index_key'],
+                                'ce': last_ref.instrument_ce,
+                                'pe': last_ref.instrument_pe
+                            }
+                            print(f"State Recovery: Recovered instruments for {index_name} from RefLevel")
+
+            print("State Recovery: Complete.")
+        except Exception as e:
+            print(f"Error during state recovery: {e}")
+        finally:
+            session.close()
+
     async def save_tick_batch(self):
         if not self.tick_batch: return
         batch = self.tick_batch.copy()
@@ -320,6 +367,9 @@ class TradingBot:
     async def run(self):
         init_db()
         print("Trading Bot Started")
+
+        # 0. Recover state from previous session
+        await self.recover_state()
 
         # 1. Initial Discovery
         all_keys = []
