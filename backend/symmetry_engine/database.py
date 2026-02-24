@@ -79,6 +79,10 @@ engine = create_engine(f'sqlite:///{DB_PATH}')
 Session = sessionmaker(bind=engine)
 
 def init_db():
+    import os
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
     Base.metadata.create_all(engine)
 
 def get_session():

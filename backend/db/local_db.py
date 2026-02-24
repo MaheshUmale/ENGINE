@@ -23,7 +23,9 @@ class LocalDBJSONEncoder(json.JSONEncoder):
             if not np.isfinite(obj): return None
         return super().default(obj)
 
-DB_PATH = os.getenv('DUCKDB_PATH', 'pro_trade.db')
+# Resolve absolute path relative to project root
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DB_PATH = os.getenv('DUCKDB_PATH', os.path.join(BASE_DIR, 'data', 'pro_trade.db'))
 
 class LocalDB:
     _instance = None
@@ -39,6 +41,10 @@ class LocalDB:
         return cls._instance
 
     def _init_db(self):
+        db_dir = os.path.dirname(DB_PATH)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+
         self.conn = duckdb.connect(DB_PATH)
         self.conn.execute("SET memory_limit = '1GB'")
         self.conn.execute("SET threads = 4")

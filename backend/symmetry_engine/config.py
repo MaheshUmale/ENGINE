@@ -25,7 +25,9 @@ INDICES = {
 }
 
 # Database Config
-DB_PATH = 'data/trading_engine.db'
+# Resolve absolute path relative to project root
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DB_PATH = os.path.join(BASE_DIR, 'data', 'trading_engine.db')
 
 # Strategy Specifics
 SWING_WINDOW = 15  # 15 minutes rolling swing
