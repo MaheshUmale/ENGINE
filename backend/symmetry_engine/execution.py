@@ -43,8 +43,14 @@ class ExecutionEngine:
         if signal.index_name in self.positions:
             return None # Already in a position for this index
 
-        # Apply slippage to entry price
-        entry_price = signal.option_price * (1 + self.slippage)
+        # Dynamic Slippage Modeling: Use ask price for BUY if available, else fallback
+        ask = signal.details.get('ask')
+        if ask and ask > 0:
+            entry_price = ask
+            actual_slippage = (ask - signal.option_price) / signal.option_price
+            print(f"Dynamic Slippage (Entry): {actual_slippage:.4%}")
+        else:
+            entry_price = signal.option_price * (1 + self.slippage)
 
         # Use proper lot size
         lot_size = INDICES.get(signal.index_name, {}).get('lot_size', 1)
@@ -116,7 +122,7 @@ class ExecutionEngine:
             # No running loop, perform update synchronously
             do_update()
 
-    def close_position(self, index_name, current_price, timestamp=None, index_price=None):
+    def close_position(self, index_name, current_price, timestamp=None, index_price=None, bid=None):
         """
         Closes an open position.
         """
@@ -127,8 +133,14 @@ class ExecutionEngine:
         session = self.get_session()
         trade = session.query(Trade).filter_by(id=pos['trade_id']).first()
 
-        # Apply slippage to exit price
-        exit_price = current_price * (1 - self.slippage)
+        # Dynamic Slippage Modeling: Use bid price for SELL if available, else fallback
+        if bid and bid > 0:
+            exit_price = bid
+            actual_slippage = (current_price - bid) / current_price
+            print(f"Dynamic Slippage (Exit): {actual_slippage:.4%}")
+        else:
+            exit_price = current_price * (1 - self.slippage)
+
         exit_cost = (exit_price * pos['quantity'] * self.commission_rate) + self.fixed_charge
 
         pnl_gross = (exit_price - pos['entry_price']) * pos['quantity']

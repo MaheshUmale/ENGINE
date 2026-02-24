@@ -890,6 +890,15 @@ async def get_symmetry_stats():
     finally:
         session.close()
 
+@fastapi_app.get("/api/symmetry/portfolio-greeks")
+async def get_portfolio_greeks(index_name: Optional[str] = None):
+    try:
+        from symmetry_engine.portfolio import calculate_portfolio_greeks
+        return calculate_portfolio_greeks(index_name)
+    except Exception as e:
+        logger.error(f"Portfolio Greeks error: {e}")
+        return {"delta": 0, "gamma": 0, "theta": 0, "vega": 0, "position_count": 0}
+
 @fastapi_app.get("/api/symmetry/signals")
 async def get_symmetry_signals():
     session = get_session()
