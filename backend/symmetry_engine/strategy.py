@@ -33,6 +33,9 @@ class StrategyEngine:
         if isinstance(candle, float):
             candle = {'open': candle, 'high': candle, 'low': candle, 'close': candle}
 
+        if 'instrument_key' not in candle:
+            candle['instrument_key'] = instrument_key
+
         target_history[instrument_key].append(candle)
         if len(target_history[instrument_key]) > limit:
             target_history[instrument_key].pop(0)
@@ -42,8 +45,11 @@ class StrategyEngine:
         if history is None:
             history = self.candle_history.get(instrument_key, [])
 
-        if len(history) < period + 1:
+        if not history or len(history) < 2:
             return 0
+
+        # Adjust period if history is short
+        effective_period = min(period, len(history) - 1)
 
         tr_list = []
         for i in range(1, len(history)):
@@ -53,7 +59,7 @@ class StrategyEngine:
             tr = max(h - l, abs(h - pc), abs(l - pc))
             tr_list.append(tr)
 
-        return sum(tr_list[-period:]) / period
+        return sum(tr_list[-effective_period:]) / effective_period
 
     def calculate_velocity(self, instrument_key):
         """Price Velocity: Rate of change over 3 candles."""
@@ -208,17 +214,23 @@ class StrategyEngine:
                 details['volume_active'] = True
 
             if score >= self.confluence_threshold:
+                # Log attempt
+                print(f"SIGNAL ATTEMPT: Bullish signal for {self.index_name} with score {score}")
                 # Check MTF Confirmation
                 if not self.check_mtf_confirmation('Bullish', idx_key):
+                    print(f"SIGNAL REJECTED: Bullish MTF Confirmation Failed for {self.index_name}")
                     return None
 
                 # Check Guardrails
-                if not self.check_guardrails('Bullish', idx_data, ce_data, pe_data, ref_high):
-                    self.reset_trailing_sl()
-                    details['ce_key'] = ce_key
-                    details['pe_key'] = pe_key
-                    return Signal(index_name=self.index_name, side='BUY_CE', index_price=idx_data['ltp'],
-                                  option_price=ce_data['ltp'], confluence_score=score, details=details)
+                if self.check_guardrails('Bullish', idx_data, ce_data, pe_data, ref_high):
+                    print(f"SIGNAL REJECTED: Bullish Guardrails (Trap) Detected for {self.index_name}")
+                    return None
+
+                self.reset_trailing_sl()
+                details['ce_key'] = ce_key
+                details['pe_key'] = pe_key
+                return Signal(index_name=self.index_name, side='BUY_CE', index_price=idx_data['ltp'],
+                                option_price=ce_data['ltp'], confluence_score=score, details=details)
 
         # --- Bearish Trigger (Put Buy) ---
         if ref_low:
@@ -228,6 +240,9 @@ class StrategyEngine:
             if idx_data['ltp'] < ref_low['index_price']:
                 score += 1
                 details['index_break'] = True
+            else:
+                # Log why score might be low
+                pass
 
             if pe_data['ltp'] > ref_low['pe_price']:
                 score += 1
@@ -257,14 +272,18 @@ class StrategyEngine:
             if score >= self.confluence_threshold:
                 # Check MTF Confirmation
                 if not self.check_mtf_confirmation('Bearish', idx_key):
+                    print(f"SIGNAL REJECTED: Bearish MTF Confirmation Failed for {self.index_name}")
                     return None
 
-                if not self.check_guardrails('Bearish', idx_data, ce_data, pe_data, ref_low):
-                    self.reset_trailing_sl()
-                    details['ce_key'] = ce_key
-                    details['pe_key'] = pe_key
-                    return Signal(index_name=self.index_name, side='BUY_PE', index_price=idx_data['ltp'],
-                                  option_price=pe_data['ltp'], confluence_score=score, details=details)
+                if self.check_guardrails('Bearish', idx_data, ce_data, pe_data, ref_low):
+                    print(f"SIGNAL REJECTED: Bearish Guardrails (Trap) Detected for {self.index_name}")
+                    return None
+
+                self.reset_trailing_sl()
+                details['ce_key'] = ce_key
+                details['pe_key'] = pe_key
+                return Signal(index_name=self.index_name, side='BUY_PE', index_price=idx_data['ltp'],
+                                option_price=pe_data['ltp'], confluence_score=score, details=details)
 
         return None
 

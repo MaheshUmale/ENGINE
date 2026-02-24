@@ -62,7 +62,7 @@ class TradingBot:
 
         buffer_key = f"{index_name}_{key}"
         if buffer_key not in self.candle_buffers:
-            self.candle_buffers[buffer_key] = {'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
+            self.candle_buffers[buffer_key] = {'instrument_key': key, 'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
 
         buffer = self.candle_buffers[buffer_key]
         if minute > buffer['timestamp']:
@@ -124,7 +124,7 @@ class TradingBot:
                 buf5['volume'] += buffer['volume']
 
             # Reset buffer
-            self.candle_buffers[buffer_key] = {'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
+            self.candle_buffers[buffer_key] = {'instrument_key': key, 'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
         else:
             # Update buffer
             buffer['high'] = max(buffer['high'], price)
@@ -143,15 +143,15 @@ class TradingBot:
                     if other_name == index_name: continue
                     if not other_engine.get_trend_state(signal.side):
                         other_sync = False
+                        print(f"SIGNAL REJECTED: Multi-Index Sync Failed for {index_name} {signal.side}. {other_name} not in sync.")
                         break
                 if not other_sync:
-                    # Optional: Log that sync failed
                     return
 
             # Risk Management
             can_trade, reason = self.risk_manager.can_trade(len(self.execution.positions))
             if not can_trade:
-                print(f"Trade blocked by Risk Manager: {reason}")
+                print(f"SIGNAL REJECTED: Risk Manager blocked {index_name} {signal.side}. Reason: {reason}")
                 return
 
             # For live, we can use current index price
@@ -293,12 +293,26 @@ class TradingBot:
         print("Performing Strategy Warmup...")
         for name, engine in self.engines.items():
             details = self.instruments.get(name)
-            if not details: continue
+            if not details:
+                print(f"Warmup Skipped for {name}: Instruments not discovered.")
+                continue
 
-            # Fetch last 2 days of data for Index, CE, PE
-            idx_hist = await self.data_provider.get_historical_data(details['index'], interval=1)
-            ce_hist = await self.data_provider.get_historical_data(details['ce'], interval=1)
-            pe_hist = await self.data_provider.get_historical_data(details['pe'], interval=1)
+            # Fetch last 2 days of data for Index, CE, PE (with retries)
+            async def fetch_with_retry(key, retries=3):
+                for i in range(retries):
+                    try:
+                        data = await self.data_provider.get_historical_data(key, interval=1)
+                        if data is not None and not data.empty:
+                            return data
+                    except Exception as e:
+                        print(f"Warmup: Attempt {i+1} failed for {key}: {e}")
+                    await asyncio.sleep(2)
+                return None
+
+            print(f"Warmup: Fetching history for {name}...")
+            idx_hist = await fetch_with_retry(details['index'])
+            ce_hist = await fetch_with_retry(details['ce'])
+            pe_hist = await fetch_with_retry(details['pe'])
 
             if idx_hist is not None and not idx_hist.empty:
                 print(f"Ingesting historical candles for {name} warm-up")
