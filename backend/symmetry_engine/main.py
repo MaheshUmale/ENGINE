@@ -63,7 +63,8 @@ class TradingBot:
         engine = self.engines[index_name]
         instruments = self.instruments[index_name]
 
-        now = datetime.datetime.now()
+        # Use UTC for all DB-stored timestamps to ensure alignment with signals/trades
+        now = datetime.datetime.utcnow()
         minute = now.replace(second=0, microsecond=0)
 
         buffer_key = f"{index_name}_{key}"
@@ -282,6 +283,8 @@ class TradingBot:
 
             threshold = 25 if index_name == 'NIFTY' else 100
 
+            # Only update instruments during market hours or if never updated
+            # For simplicity in paper trading, we update anytime price moves significantly
             if abs(current_price - last_update_price) >= threshold or last_update_price == 0:
                 old_details = self.instruments.get(index_name)
                 details = await self.data_provider.get_instrument_details(index_name)

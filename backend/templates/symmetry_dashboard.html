@@ -157,6 +157,7 @@
         let currentSymbol = 'NSE:NIFTY';
         let markers = [];
         let priceLines = {};
+        let lastCandleTime = 0;
 
         function initPriceChart() {
             const container = document.getElementById('price-chart');
@@ -187,11 +188,12 @@
             try {
                 const res = await fetch(`/api/tv/intraday/${encodeURIComponent(symbol)}?interval=1`);
                 const data = await res.json();
-                if (data && data.candles) {
+                if (data && data.candles && data.candles.length > 0) {
                     const candles = data.candles.map(c => ({
                         time: Number(c[0]), open: c[1], high: c[2], low: c[3], close: c[4]
                     }));
                     mainSeries.setData(candles);
+                    lastCandleTime = candles[candles.length - 1].time;
 
                     const volumes = data.candles.map(c => ({
                         time: Number(c[0]), value: c[5],
@@ -249,17 +251,25 @@
 
             socket.on('raw_tick', (data) => {
                 if (data[currentSymbol]) {
-                    const tick = data[currentSymbol];
-                    const ts = Math.floor(tick.ts_ms / 1000);
-                    const candleTime = ts - (ts % 60);
+                    try {
+                        const tick = data[currentSymbol];
+                        const ts = Math.floor(tick.ts_ms / 1000);
+                        if (isNaN(ts)) return;
+                        const candleTime = ts - (ts % 60);
 
-                    mainSeries.update({
-                        time: candleTime,
-                        open: tick.last_price,
-                        high: tick.last_price,
-                        low: tick.last_price,
-                        close: tick.last_price
-                    });
+                        if (candleTime >= lastCandleTime) {
+                            mainSeries.update({
+                                time: candleTime,
+                                open: tick.last_price,
+                                high: tick.last_price,
+                                low: tick.last_price,
+                                close: tick.last_price
+                            });
+                            lastCandleTime = candleTime;
+                        }
+                    } catch (e) {
+                        console.warn("Tick update failed:", e);
+                    }
                 }
             });
 
@@ -267,9 +277,18 @@
                 if (data.instrumentKey === currentSymbol) {
                     if (data.ohlcv) {
                         data.ohlcv.forEach(c => {
-                            mainSeries.update({
-                                time: Number(c[0]), open: c[1], high: c[2], low: c[3], close: c[4]
-                            });
+                            try {
+                                const t = Number(c[0]);
+                                if (isNaN(t)) return;
+                                if (t >= lastCandleTime) {
+                                    mainSeries.update({
+                                        time: t, open: c[1], high: c[2], low: c[3], close: c[4]
+                                    });
+                                    lastCandleTime = t;
+                                }
+                            } catch (e) {
+                                console.warn("Chart candle update failed:", e);
+                            }
                         });
                     }
                     if (data.indicators) {
@@ -282,6 +301,7 @@
         document.getElementById('index-selector').addEventListener('change', (e) => {
             if (socket) socket.emit('unsubscribe', { instrumentKeys: [currentSymbol], interval: '1' });
             currentSymbol = e.target.value;
+            lastCandleTime = 0;
             if (socket) socket.emit('subscribe', { instrumentKeys: [currentSymbol], interval: '1' });
             fetchHistory(currentSymbol);
         });

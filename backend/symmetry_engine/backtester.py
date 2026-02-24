@@ -158,7 +158,6 @@ class Backtester:
             else:
                 combined['volume_fut'] = 0
 
-            combined.sort_values('timestamp', inplace=True)
             # Use forward fill for prices and OI to handle missing candles, then fill remaining NaNs with 0
             combined = combined.dropna(subset=['close_idx'])
             combined = combined.sort_values('timestamp').ffill().fillna(0)

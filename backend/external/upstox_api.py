@@ -62,7 +62,9 @@ class UpstoxAPIClient:
                 formatted = []
                 for c in raw_candles:
                     try:
-                        dt = datetime.fromisoformat(c[0].replace('+05:30', ''))
+                        # Upstox returns ISO format with +05:30 offset
+                        # Use fromisoformat which handles offsets since Python 3.7
+                        dt = datetime.fromisoformat(c[0])
                         ts = int(dt.timestamp())
                         formatted.append([ts, float(c[1]), float(c[2]), float(c[3]), float(c[4]), int(c[5])])
                     except Exception as e:

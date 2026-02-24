@@ -400,9 +400,11 @@ async def get_intraday(
                         session.close()
 
                         bot_markers = []
+                        import datetime
                         for sig in bot_signals:
                             # Floor to nearest minute to align with candles
-                            ts = int(sig.timestamp.timestamp())
+                            # Use UTC timezone to avoid local server time shift
+                            ts = int(sig.timestamp.replace(tzinfo=datetime.timezone.utc).timestamp())
                             ts = ts - (ts % 60)
                             bot_markers.append({
                                 "time": ts,
@@ -415,7 +417,7 @@ async def get_intraday(
 
                         for tr in bot_trades:
                             # Floor to nearest minute
-                            ts = int(tr.timestamp.timestamp())
+                            ts = int(tr.timestamp.replace(tzinfo=datetime.timezone.utc).timestamp())
                             ts = ts - (ts % 60)
                             bot_markers.append({
                                 "time": ts,
