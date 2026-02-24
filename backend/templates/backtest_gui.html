@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRODESK | Advanced Backtester</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0f172a; color: #f8fafc; }
+        .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
+    </style>
+</head>
+<body class="h-full flex flex-col overflow-hidden">
+    <header class="h-14 py-2 glass-panel border-b border-white/5 px-6 flex items-center justify-between">
+        <div class="flex items-center gap-4">
+            <a href="/" class="text-sm font-black text-white italic tracking-tighter uppercase">PRO<span class="text-blue-500">DESK</span></a>
+            <span class="text-[10px] font-bold text-blue-400 uppercase tracking-widest px-3 py-1 bg-blue-500/10 rounded-full">Backtest Engine</span>
+        </div>
+        <nav class="flex items-center gap-6">
+            <a href="/" class="text-[10px] font-bold text-gray-500 hover:text-white transition-colors uppercase tracking-widest">Terminal</a>
+            <a href="/options" class="text-[10px] font-bold text-gray-500 hover:text-white transition-colors uppercase tracking-widest">Options</a>
+            <a href="/symmetry" class="text-[10px] font-bold text-gray-500 hover:text-white transition-colors uppercase tracking-widest">Symmetry</a>
+        </nav>
+    </header>
+
+    <main class="flex-1 p-6 flex gap-6 overflow-hidden">
+        <!-- Configuration Panel -->
+        <aside class="w-80 glass-panel rounded-2xl p-6 flex flex-col gap-6 overflow-y-auto custom-scrollbar">
+            <h2 class="text-xs font-black uppercase italic tracking-widest text-blue-500">Backtest Config</h2>
+
+            <form id="backtestForm" class="space-y-4">
+                <div class="space-y-1">
+                    <label class="text-[10px] font-black text-gray-500 uppercase">Index</label>
+                    <select id="index_name" name="index_name" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500 transition-all text-white">
+                        <option value="NIFTY">NIFTY 50</option>
+                        <option value="BANKNIFTY">BANK NIFTY</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="space-y-1">
+                        <label class="text-[10px] font-black text-gray-500 uppercase">From Date</label>
+                        <input type="date" id="from_date" name="from_date" required class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500 transition-all text-white">
+                    </div>
+                    <div class="space-y-1">
+                        <label class="text-[10px] font-black text-gray-500 uppercase">To Date</label>
+                        <input type="date" id="to_date" name="to_date" required class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500 transition-all text-white">
+                    </div>
+                </div>
+
+                <div class="space-y-1 pt-4 border-t border-white/5">
+                    <h3 class="text-[9px] font-black text-gray-400 uppercase tracking-tighter mb-2">Strategy Parameters</h3>
+
+                    <div class="space-y-3">
+                        <div class="flex justify-between items-center">
+                            <label class="text-[10px] font-bold text-gray-400">Swing Window</label>
+                            <input type="number" name="swing_window" value="10" class="w-16 bg-gray-900 border border-white/10 rounded px-2 py-1 text-[10px] text-right">
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <label class="text-[10px] font-bold text-gray-400">Confluence Threshold</label>
+                            <input type="number" name="confluence_threshold" value="4" class="w-16 bg-gray-900 border border-white/10 rounded px-2 py-1 text-[10px] text-right">
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <label class="text-[10px] font-bold text-gray-400">ATR Multiplier</label>
+                            <input type="number" step="0.1" name="atr_multiplier" value="1.5" class="w-16 bg-gray-900 border border-white/10 rounded px-2 py-1 text-[10px] text-right">
+                        </div>
+                        <label class="flex items-center gap-2 cursor-pointer py-1">
+                            <input type="checkbox" name="enable_index_sync" checked class="w-3 h-3 rounded text-blue-500 bg-gray-800 border-gray-700">
+                            <span class="text-[10px] font-bold text-gray-400">Multi-Index Sync</span>
+                        </label>
+                    </div>
+                </div>
+
+                <button type="submit" id="runBtn" class="w-full py-4 mt-6 text-[11px] font-black uppercase tracking-widest bg-blue-600 rounded-xl hover:bg-blue-500 transition-all shadow-lg shadow-blue-600/20 active:scale-95 flex items-center justify-center gap-2">
+                    <span id="btnText">Run Backtest</span>
+                    <div id="loader" class="hidden w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                </button>
+            </form>
+        </aside>
+
+        <!-- Results Display -->
+        <section class="flex-1 flex flex-col gap-6 overflow-hidden">
+            <!-- KPIs -->
+            <div id="kpiGrid" class="grid grid-cols-5 gap-4">
+                <div class="glass-panel rounded-2xl p-4">
+                    <div class="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Total PnL</div>
+                    <div id="stat_pnl" class="text-xl font-black text-white">₹0.00</div>
+                </div>
+                <div class="glass-panel rounded-2xl p-4">
+                    <div class="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Win Rate</div>
+                    <div id="stat_winrate" class="text-xl font-black text-white">0.0%</div>
+                </div>
+                <div class="glass-panel rounded-2xl p-4">
+                    <div class="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Total Trades</div>
+                    <div id="stat_trades" class="text-xl font-black text-white">0</div>
+                </div>
+                <div class="glass-panel rounded-2xl p-4">
+                    <div class="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Max Drawdown</div>
+                    <div id="stat_dd" class="text-xl font-black text-red-400">₹0.00</div>
+                </div>
+                <div class="glass-panel rounded-2xl p-4">
+                    <div class="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Sharpe Ratio</div>
+                    <div id="stat_sharpe" class="text-xl font-black text-blue-400">0.00</div>
+                </div>
+            </div>
+
+            <!-- Charts & Logs -->
+            <div class="flex-1 flex flex-col glass-panel rounded-2xl overflow-hidden">
+                <div class="p-4 border-b border-white/5 flex items-center justify-between">
+                    <div class="flex gap-4">
+                        <button class="text-[10px] font-black text-blue-500 border-b-2 border-blue-500 pb-1">Equity Curve</button>
+                        <button class="text-[10px] font-black text-gray-500 hover:text-white pb-1">Trade Log</button>
+                    </div>
+                </div>
+                <div id="equity_chart" class="flex-1 w-full bg-black/10"></div>
+                <div id="trade_log" class="hidden flex-1 overflow-y-auto custom-scrollbar p-4">
+                    <table class="w-full text-[10px] border-collapse">
+                        <thead>
+                            <tr class="text-gray-500 text-left uppercase border-b border-white/5">
+                                <th class="py-2 font-black">Time</th>
+                                <th class="py-2 font-black">Index</th>
+                                <th class="py-2 font-black">Type</th>
+                                <th class="py-2 font-black">Entry</th>
+                                <th class="py-2 font-black">Exit</th>
+                                <th class="py-2 font-black">PnL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="log_body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        document.getElementById('backtestForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const runBtn = document.getElementById('runBtn');
+            const loader = document.getElementById('loader');
+            const btnText = document.getElementById('btnText');
+
+            runBtn.disabled = true;
+            loader.classList.remove('hidden');
+            btnText.innerText = 'Analyzing...';
+
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData.entries());
+            data.enable_index_sync = formData.get('enable_index_sync') === 'on';
+
+            try {
+                const res = await fetch('/api/backtest/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+
+                if (result.status === 'success') {
+                    updateDashboard(result.report);
+                } else {
+                    alert('Backtest Error: ' + result.message);
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Connection Error');
+            } finally {
+                runBtn.disabled = false;
+                loader.classList.add('hidden');
+                btnText.innerText = 'Run Backtest';
+            }
+        });
+
+        function updateDashboard(report) {
+            document.getElementById('stat_pnl').innerText = `₹${report.total_pnl.toFixed(2)}`;
+            document.getElementById('stat_winrate').innerText = `${report.win_rate.toFixed(1)}%`;
+            document.getElementById('stat_trades').innerText = report.trade_count;
+            document.getElementById('stat_dd').innerText = `₹${report.max_drawdown.toFixed(2)}`;
+            document.getElementById('stat_sharpe').innerText = report.sharpe_ratio.toFixed(2);
+
+            if (report.equity_curve) {
+                Plotly.newPlot('equity_chart', JSON.parse(report.equity_curve).data, {
+                    paper_bgcolor: 'transparent',
+                    plot_bgcolor: 'transparent',
+                    font: { color: '#94a3b8', size: 10 },
+                    margin: { t: 40, b: 40, l: 60, r: 40 },
+                    xaxis: { gridcolor: 'rgba(255,255,255,0.05)', zeroline: false },
+                    yaxis: { gridcolor: 'rgba(255,255,255,0.05)', zeroline: false },
+                    height: 400
+                }, { responsive: true, displayModeBar: false });
+            }
+
+            const logBody = document.getElementById('log_body');
+            logBody.innerHTML = report.trades.map(t => `
+                <tr class="border-b border-white/5 hover:bg-white/5">
+                    <td class="py-3 text-gray-400 font-mono">${new Date(t.timestamp).toLocaleString('en-IN')}</td>
+                    <td class="py-3 font-bold">${t.index}</td>
+                    <td class="py-3">
+                        <span class="px-2 py-0.5 rounded ${t.instrument.includes('CE') ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'} font-black">
+                            ${t.instrument}
+                        </span>
+                    </td>
+                    <td class="py-3 font-mono">₹${t.price.toFixed(2)}</td>
+                    <td class="py-3 font-mono">₹${t.exit_price.toFixed(2)}</td>
+                    <td class="py-3 font-mono font-black ${t.pnl >= 0 ? 'text-green-500' : 'text-red-500'}">
+                        ${t.pnl >= 0 ? '+' : ''}₹${t.pnl.toFixed(2)}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // Tab Switching
+        document.querySelectorAll('.flex.gap-4 button').forEach((btn, idx) => {
+            btn.onclick = () => {
+                document.querySelectorAll('.flex.gap-4 button').forEach(b => {
+                    b.classList.remove('text-blue-500', 'border-b-2', 'border-blue-500');
+                    b.classList.add('text-gray-500');
+                });
+                btn.classList.add('text-blue-500', 'border-b-2', 'border-blue-500');
+                btn.classList.remove('text-gray-500');
+
+                document.getElementById('equity_chart').classList.toggle('hidden', idx === 1);
+                document.getElementById('trade_log').classList.toggle('hidden', idx === 0);
+            };
+        });
+
+        // Set default dates (last 7 days)
+        const to = new Date();
+        const from = new Date();
+        from.setDate(from.getDate() - 7);
+        document.getElementById('to_date').valueAsDate = to;
+        document.getElementById('from_date').valueAsDate = from;
+    </script>
+</body>
+</html>

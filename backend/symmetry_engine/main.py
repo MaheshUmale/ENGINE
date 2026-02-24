@@ -62,7 +62,7 @@ class TradingBot:
 
         buffer_key = f"{index_name}_{key}"
         if buffer_key not in self.candle_buffers:
-            self.candle_buffers[buffer_key] = {'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
+            self.candle_buffers[buffer_key] = {'instrument_key': key, 'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
 
         buffer = self.candle_buffers[buffer_key]
         if minute > buffer['timestamp']:
@@ -76,13 +76,10 @@ class TradingBot:
                 def db_ops():
                     session = get_session()
                     try:
-                        # Phase I: Identify Swing
-                        last_candles = session.query(Candle).filter_by(instrument_key=key).order_by(Candle.timestamp.desc()).limit(20).all()
-
-                        if last_candles:
-                            df = pd.DataFrame([c.__dict__ for c in last_candles])
-                            df = pd.concat([df, candle_df], ignore_index=True)
-                            swing = engine.identify_swing(df)
+                        # Phase I: Identify Swing (Optimized: use internal engine history)
+                        history = engine.candle_history.get(key, [])
+                        if len(history) >= 5:
+                            swing = engine.identify_swing(history)
                             if swing:
                                 # Fetch current option prices for reference
                                 ce_data = engine.current_data.get(instruments['ce'], {})
@@ -127,7 +124,7 @@ class TradingBot:
                 buf5['volume'] += buffer['volume']
 
             # Reset buffer
-            self.candle_buffers[buffer_key] = {'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
+            self.candle_buffers[buffer_key] = {'instrument_key': key, 'timestamp': minute, 'open': price, 'high': price, 'low': price, 'close': price, 'volume': 0}
         else:
             # Update buffer
             buffer['high'] = max(buffer['high'], price)
@@ -146,15 +143,15 @@ class TradingBot:
                     if other_name == index_name: continue
                     if not other_engine.get_trend_state(signal.side):
                         other_sync = False
+                        print(f"SIGNAL REJECTED: Multi-Index Sync Failed for {index_name} {signal.side}. {other_name} not in sync.")
                         break
                 if not other_sync:
-                    # Optional: Log that sync failed
                     return
 
             # Risk Management
             can_trade, reason = self.risk_manager.can_trade(len(self.execution.positions))
             if not can_trade:
-                print(f"Trade blocked by Risk Manager: {reason}")
+                print(f"SIGNAL REJECTED: Risk Manager blocked {index_name} {signal.side}. Reason: {reason}")
                 return
 
             # For live, we can use current index price
@@ -172,6 +169,11 @@ class TradingBot:
             idx_data = engine.current_data.get(instruments['index'], {})
             ce_data = engine.current_data.get(instruments['ce'], {})
             pe_data = engine.current_data.get(instruments['pe'], {})
+
+            # Sync trailing SL from StrategyEngine to ExecutionEngine/DB
+            current_sl = engine.trailing_sl.get(index_name, 0)
+            if current_sl != pos.get('trailing_sl', 0):
+                self.execution.update_trailing_sl(index_name, current_sl)
 
             from types import SimpleNamespace
             if engine.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data):
@@ -191,11 +193,11 @@ class TradingBot:
         print("State Recovery: Initializing...")
 
         # 1. Recover positions and risk metrics
-        self.execution.recover_positions()
-        self.risk_manager.recover_pnl()
+        await asyncio.to_thread(self.execution.recover_positions)
+        await asyncio.to_thread(self.risk_manager.recover_pnl)
 
         # 2. Recover StrategyEngine states (Reference Levels and Instruments)
-        session = get_session()
+        session = await asyncio.to_thread(get_session)
         try:
             from .database import ReferenceLevel
             for index_name, engine in self.engines.items():
@@ -224,6 +226,13 @@ class TradingBot:
                                 'pe': last_ref.instrument_pe
                             }
                             print(f"State Recovery: Recovered instruments for {index_name} from RefLevel")
+
+                # 3. Recover active trailing stop losses for restored positions
+                if index_name in self.execution.positions:
+                    pos = self.execution.positions[index_name]
+                    if pos.get('trailing_sl'):
+                        engine.trailing_sl[index_name] = pos['trailing_sl']
+                        print(f"State Recovery: Recovered trailing SL for {index_name}: {pos['trailing_sl']}")
 
             print("State Recovery: Complete.")
         except Exception as e:
@@ -284,12 +293,26 @@ class TradingBot:
         print("Performing Strategy Warmup...")
         for name, engine in self.engines.items():
             details = self.instruments.get(name)
-            if not details: continue
+            if not details:
+                print(f"Warmup Skipped for {name}: Instruments not discovered.")
+                continue
 
-            # Fetch last 2 days of data for Index, CE, PE
-            idx_hist = await self.data_provider.get_historical_data(details['index'], interval=1)
-            ce_hist = await self.data_provider.get_historical_data(details['ce'], interval=1)
-            pe_hist = await self.data_provider.get_historical_data(details['pe'], interval=1)
+            # Fetch last 2 days of data for Index, CE, PE (with retries)
+            async def fetch_with_retry(key, retries=3):
+                for i in range(retries):
+                    try:
+                        data = await self.data_provider.get_historical_data(key, interval=1)
+                        if data is not None and not data.empty:
+                            return data
+                    except Exception as e:
+                        print(f"Warmup: Attempt {i+1} failed for {key}: {e}")
+                    await asyncio.sleep(2)
+                return None
+
+            print(f"Warmup: Fetching history for {name}...")
+            idx_hist = await fetch_with_retry(details['index'])
+            ce_hist = await fetch_with_retry(details['ce'])
+            pe_hist = await fetch_with_retry(details['pe'])
 
             if idx_hist is not None and not idx_hist.empty:
                 print(f"Ingesting historical candles for {name} warm-up")
@@ -353,19 +376,24 @@ class TradingBot:
                             timestamp=current['timestamp'].to_pydatetime()
                         )
 
-                # Save historical candles to DB if not present
-                session = get_session()
-                for _, row in idx_hist.tail(100).iterrows():
-                    exists = session.query(Candle).filter_by(instrument_key=details['index'], timestamp=row['timestamp']).first()
-                    if not exists:
-                        db_candle = Candle(
-                            instrument_key=details['index'], interval=1, timestamp=row['timestamp'],
-                            open=row['open_idx'], high=row['high_idx'], low=row['low_idx'],
-                            close=row['close_idx'], volume=row['volume_idx']
-                        )
-                        session.add(db_candle)
-                session.commit()
-                session.close()
+                # Save historical candles to DB if not present (Optimized: offload to thread)
+                def save_hist():
+                    session = get_session()
+                    try:
+                        for _, row in idx_hist.tail(100).iterrows():
+                            exists = session.query(Candle).filter_by(instrument_key=details['index'], timestamp=row['timestamp']).first()
+                            if not exists:
+                                db_candle = Candle(
+                                    instrument_key=details['index'], interval=1, timestamp=row['timestamp'],
+                                    open=row['open_idx'], high=row['high_idx'], low=row['low_idx'],
+                                    close=row['close_idx'], volume=row['volume_idx']
+                                )
+                                session.add(db_candle)
+                        session.commit()
+                    finally:
+                        session.close()
+
+                asyncio.create_task(asyncio.to_thread(save_hist))
 
     async def run(self):
         init_db()

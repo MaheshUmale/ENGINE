@@ -113,6 +113,7 @@ class ChartInstance {
         this.showIndicators = true; // Enabled by default
         this.oiLines = [];
         this.activeSymmetrySignal = null;
+        this.customIndicatorSeries = null;
 
         this.initChart();
     }
@@ -374,6 +375,41 @@ class ChartInstance {
             this.fullHistory.indicators_raw = data.indicators;
             this.applyIndicators(data.indicators);
             this.updateLegend(data.indicators);
+        }
+    }
+
+    applyCustomScript(scriptCode) {
+        if (!scriptCode || scriptCode.trim() === '') {
+            if (this.customIndicatorSeries) {
+                this.chart.removeSeries(this.customIndicatorSeries);
+                this.customIndicatorSeries = null;
+            }
+            return;
+        }
+
+        try {
+            // Safe evaluation of the script
+            const scriptFn = new Function('candles', `return (${scriptCode})(candles)`);
+            const candles = Array.from(this.fullHistory.candles.values()).sort((a,b) => a.time - b.time);
+            const data = scriptFn(candles);
+
+            if (!Array.isArray(data)) throw new Error("Script must return an array of {time, value}");
+
+            if (!this.customIndicatorSeries) {
+                this.customIndicatorSeries = this.chart.addLineSeries({
+                    color: '#f97316',
+                    lineWidth: 2,
+                    title: 'Custom Script',
+                    lastValueVisible: false,
+                    priceLineVisible: false
+                });
+            }
+
+            this.customIndicatorSeries.setData(data.map(d => ({ ...d, time: Number(d.time) })));
+            console.log("[Chart] Custom script applied successfully");
+        } catch (err) {
+            console.error("[Chart] Custom script error:", err);
+            alert("Script Error: " + err.message);
         }
     }
 
@@ -1058,6 +1094,30 @@ class MultiChartEngine {
         document.getElementById('replayNextBtn').addEventListener('click', () => this.replay.next());
         document.getElementById('replayPrevBtn').addEventListener('click', () => this.replay.prev());
         document.getElementById('exitReplayBtn').addEventListener('click', () => this.replay.exit());
+
+        document.getElementById('customIndicatorBtn')?.addEventListener('click', () => {
+            const modal = document.getElementById('customIndicatorModal');
+            if (modal) {
+                const savedCode = localStorage.getItem('custom_indicator_script') || '';
+                document.getElementById('customIndicatorCode').value = savedCode;
+                modal.classList.remove('hidden');
+            }
+        });
+
+        document.getElementById('closeIndicatorModal')?.addEventListener('click', () => {
+            document.getElementById('customIndicatorModal').classList.add('hidden');
+        });
+
+        document.getElementById('clearIndicatorBtn')?.addEventListener('click', () => {
+            document.getElementById('customIndicatorCode').value = '';
+        });
+
+        document.getElementById('applyIndicatorBtn')?.addEventListener('click', () => {
+            const code = document.getElementById('customIndicatorCode').value;
+            localStorage.setItem('custom_indicator_script', code);
+            this.charts[this.activeIdx].applyCustomScript(code);
+            document.getElementById('customIndicatorModal').classList.add('hidden');
+        });
 
         document.getElementById('maximizeBtn')?.addEventListener('click', () => {
             const c = this.charts[this.activeIdx];

@@ -736,6 +736,109 @@ async def serve_options(request: Request): return templates.TemplateResponse("op
 async def serve_symmetry(request: Request):
     return templates.TemplateResponse("symmetry_dashboard.html", {"request": request})
 
+@fastapi_app.get("/backtest")
+async def serve_backtest(request: Request):
+    return templates.TemplateResponse("backtest_gui.html", {"request": request})
+
+@fastapi_app.post("/api/backtest/run")
+async def run_backtest_api(request: Request):
+    try:
+        data = await request.json()
+        index_name = data.get('index_name', 'NIFTY')
+        from_date = data.get('from_date')
+        to_date = data.get('to_date')
+
+        # Strategy Parameters
+        params = {
+            'swing_window': int(data.get('swing_window', 10)),
+            'confluence_threshold': int(data.get('confluence_threshold', 4)),
+            'atr_multiplier': float(data.get('atr_multiplier', 1.5)),
+            'enable_index_sync': bool(data.get('enable_index_sync', True))
+        }
+
+        from symmetry_engine.backtester import Backtester
+        import plotly.graph_objects as go
+        import json
+        import uuid
+
+        # Use a unique DB for each backtest to allow concurrency
+        run_id = str(uuid.uuid4())[:8]
+        bt_db = f"data/backtest_{run_id}.db"
+        bt = Backtester(index_name, db_path=bt_db)
+        bt.params = params
+
+        # Run backtest
+        await bt.run_backtest(from_date, to_date)
+
+        # Generate Report from the specific backtest DB
+        session = bt.get_backtest_session()
+        trades = session.query(Trade).filter(Trade.status == 'CLOSED', Trade.side == 'SELL').order_by(Trade.timestamp.asc()).all()
+
+        trade_list = []
+        equity_data = []
+        cum_pnl = 0
+
+        for t in trades:
+            cum_pnl += t.pnl
+            trade_list.append({
+                "timestamp": t.timestamp.isoformat(),
+                "index": t.index_name,
+                "instrument": t.instrument_key,
+                "price": t.price, # This is the exit price for SELL trades in current schema?
+                                  # Wait, ExecutionEngine.close_position creates a new Trade with side='SELL'
+                "pnl": t.pnl,
+                # For the log, we want to show entry and exit prices
+                "exit_price": t.price
+            })
+            equity_data.append({"time": t.timestamp, "pnl": cum_pnl})
+
+        # Calculate KPIs
+        pnls = [t.pnl for t in trades]
+        total_pnl = sum(pnls)
+        trade_count = len(pnls)
+        win_rate = (len([p for p in pnls if p > 0]) / trade_count * 100) if trade_count > 0 else 0
+
+        df_equity = pd.DataFrame(equity_data)
+        equity_json = None
+        max_dd = 0
+        sharpe = 0
+
+        if not df_equity.empty:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df_equity['time'], y=df_equity['pnl'], mode='lines', name='Equity'))
+            equity_json = fig.to_json()
+
+            cum_pnl_series = df_equity['pnl']
+            max_pnl = cum_pnl_series.expanding().max()
+            drawdown = cum_pnl_series - max_pnl
+            max_dd = drawdown.min()
+
+            if trade_count > 1:
+                avg_pnl = total_pnl / trade_count
+                std = pd.Series(pnls).std()
+                sharpe = (avg_pnl / std) * (252**0.5) if std != 0 else 0
+
+        session.close()
+
+        # Cleanup temporary DB (optional, maybe keep it for a while)
+        # os.remove(bt_db)
+
+        return {
+            "status": "success",
+            "report": {
+                "total_pnl": total_pnl,
+                "win_rate": win_rate,
+                "trade_count": trade_count,
+                "max_drawdown": max_dd,
+                "sharpe_ratio": sharpe,
+                "equity_curve": equity_json,
+                "trades": trade_list[::-1] # Latest first for log
+            }
+        }
+    except Exception as e:
+        logger.error(f"Backtest API error: {e}")
+        return {"status": "error", "message": str(e)}
+
 @fastapi_app.get("/api/symmetry/trades")
 async def get_symmetry_trades():
     session = get_session()
@@ -749,7 +852,8 @@ async def get_symmetry_trades():
 async def get_symmetry_stats():
     session = get_session()
     try:
-        closed_trades = session.query(Trade).filter(Trade.status == 'CLOSED').all()
+        # Only use 'SELL' trades for stats to avoid doubling PnL (pnl is set on both BUY and SELL records in current paper engine)
+        closed_trades = session.query(Trade).filter(Trade.status == 'CLOSED', Trade.side == 'SELL').all()
         if not closed_trades:
             return {"total_pnl": 0, "trade_count": 0, "win_rate": 0, "max_drawdown": 0, "sharpe_ratio": 0, "avg_pnl": 0}
 

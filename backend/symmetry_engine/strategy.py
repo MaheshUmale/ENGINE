@@ -13,6 +13,11 @@ class StrategyEngine:
         self.candle_history_5m = {} # instrument_key -> list of last 10 5m candles
         self.trailing_sl = {} # index_name -> current_sl_price
 
+        # Strategy Parameters (can be overridden)
+        self.swing_window = SWING_WINDOW
+        self.confluence_threshold = CONFLUENCE_THRESHOLD
+        self.atr_multiplier = 1.5 # Default multiplier for SL
+
     def update_data(self, instrument_key, data):
         """Update current tick data."""
         self.current_data[instrument_key] = data
@@ -28,15 +33,23 @@ class StrategyEngine:
         if isinstance(candle, float):
             candle = {'open': candle, 'high': candle, 'low': candle, 'close': candle}
 
+        if 'instrument_key' not in candle:
+            candle['instrument_key'] = instrument_key
+
         target_history[instrument_key].append(candle)
         if len(target_history[instrument_key]) > limit:
             target_history[instrument_key].pop(0)
 
-    def calculate_atr(self, instrument_key, period=14):
+    def calculate_atr(self, instrument_key=None, period=14, history=None):
         """Calculate Average True Range."""
-        history = self.candle_history.get(instrument_key, [])
-        if len(history) < period + 1:
+        if history is None:
+            history = self.candle_history.get(instrument_key, [])
+
+        if not history or len(history) < 2:
             return 0
+
+        # Adjust period if history is short
+        effective_period = min(period, len(history) - 1)
 
         tr_list = []
         for i in range(1, len(history)):
@@ -46,7 +59,7 @@ class StrategyEngine:
             tr = max(h - l, abs(h - pc), abs(l - pc))
             tr_list.append(tr)
 
-        return sum(tr_list[-period:]) / period
+        return sum(tr_list[-effective_period:]) / effective_period
 
     def calculate_velocity(self, instrument_key):
         """Price Velocity: Rate of change over 3 candles."""
@@ -79,6 +92,14 @@ class StrategyEngine:
         Identify Significant Swings where a 'Wall' exists.
         Enhanced: Hits a New High/Low and confirms with 2-candle pullback + ATR filter.
         """
+        if isinstance(candles, list):
+            if len(candles) < 10: return None
+
+            # Use pandas for consistency if window is large or complex logic is needed,
+            # but for 20 candles, manual is fine. Let's stick to consistent logic.
+            df = pd.DataFrame(candles)
+            return self.identify_swing(df)
+
         if len(candles) < 10:
             return None
 
@@ -87,7 +108,7 @@ class StrategyEngine:
         atr_threshold = atr * 0.5 if atr > 0 else 0
 
         # Simple swing detection: local high/low in the window
-        last_n = candles.tail(SWING_WINDOW)
+        last_n = candles.tail(self.swing_window)
         current_high = last_n['high'].max()
         current_low = last_n['low'].min()
 
@@ -192,18 +213,24 @@ class StrategyEngine:
             if idx_data.get('volume', 0) > 0:
                 details['volume_active'] = True
 
-            if score >= CONFLUENCE_THRESHOLD:
+            if score >= self.confluence_threshold:
+                # Log attempt
+                print(f"SIGNAL ATTEMPT: Bullish signal for {self.index_name} with score {score}")
                 # Check MTF Confirmation
                 if not self.check_mtf_confirmation('Bullish', idx_key):
+                    print(f"SIGNAL REJECTED: Bullish MTF Confirmation Failed for {self.index_name}")
                     return None
 
                 # Check Guardrails
-                if not self.check_guardrails('Bullish', idx_data, ce_data, pe_data, ref_high):
-                    self.reset_trailing_sl()
-                    details['ce_key'] = ce_key
-                    details['pe_key'] = pe_key
-                    return Signal(index_name=self.index_name, side='BUY_CE', index_price=idx_data['ltp'],
-                                  option_price=ce_data['ltp'], confluence_score=score, details=details)
+                if self.check_guardrails('Bullish', idx_data, ce_data, pe_data, ref_high):
+                    print(f"SIGNAL REJECTED: Bullish Guardrails (Trap) Detected for {self.index_name}")
+                    return None
+
+                self.reset_trailing_sl()
+                details['ce_key'] = ce_key
+                details['pe_key'] = pe_key
+                return Signal(index_name=self.index_name, side='BUY_CE', index_price=idx_data['ltp'],
+                                option_price=ce_data['ltp'], confluence_score=score, details=details)
 
         # --- Bearish Trigger (Put Buy) ---
         if ref_low:
@@ -213,6 +240,9 @@ class StrategyEngine:
             if idx_data['ltp'] < ref_low['index_price']:
                 score += 1
                 details['index_break'] = True
+            else:
+                # Log why score might be low
+                pass
 
             if pe_data['ltp'] > ref_low['pe_price']:
                 score += 1
@@ -239,17 +269,21 @@ class StrategyEngine:
             if idx_data.get('volume', 0) > 0:
                 details['volume_active'] = True
 
-            if score >= CONFLUENCE_THRESHOLD:
+            if score >= self.confluence_threshold:
                 # Check MTF Confirmation
                 if not self.check_mtf_confirmation('Bearish', idx_key):
+                    print(f"SIGNAL REJECTED: Bearish MTF Confirmation Failed for {self.index_name}")
                     return None
 
-                if not self.check_guardrails('Bearish', idx_data, ce_data, pe_data, ref_low):
-                    self.reset_trailing_sl()
-                    details['ce_key'] = ce_key
-                    details['pe_key'] = pe_key
-                    return Signal(index_name=self.index_name, side='BUY_PE', index_price=idx_data['ltp'],
-                                  option_price=pe_data['ltp'], confluence_score=score, details=details)
+                if self.check_guardrails('Bearish', idx_data, ce_data, pe_data, ref_low):
+                    print(f"SIGNAL REJECTED: Bearish Guardrails (Trap) Detected for {self.index_name}")
+                    return None
+
+                self.reset_trailing_sl()
+                details['ce_key'] = ce_key
+                details['pe_key'] = pe_key
+                return Signal(index_name=self.index_name, side='BUY_PE', index_price=idx_data['ltp'],
+                                option_price=pe_data['ltp'], confluence_score=score, details=details)
 
         return None
 
@@ -272,10 +306,10 @@ class StrategyEngine:
             if atr > 0:
                 # Initialize or update trailing SL
                 if self.index_name not in self.trailing_sl:
-                    self.trailing_sl[self.index_name] = entry_price - (1.5 * atr)
+                    self.trailing_sl[self.index_name] = entry_price - (self.atr_multiplier * atr)
 
                 # Update trailing SL (only moves up)
-                new_sl = active_opt_data['ltp'] - (1.5 * atr)
+                new_sl = active_opt_data['ltp'] - (self.atr_multiplier * atr)
                 if new_sl > self.trailing_sl[self.index_name]:
                     self.trailing_sl[self.index_name] = new_sl
 
