@@ -7,6 +7,34 @@ class RiskManager:
         self.daily_pnl = 0
         self.current_date = None
 
+    def recover_pnl(self):
+        """
+        Recovers today's realized PnL from the database.
+        """
+        from .database import get_session, Trade
+        from sqlalchemy import func
+        import datetime
+
+        session = get_session()
+        try:
+            today = datetime.date.today()
+            # Start of day UTC
+            sod = datetime.datetime.combine(today, datetime.time.min)
+
+            pnl_sum = session.query(func.sum(Trade.pnl)).filter(
+                Trade.status == 'CLOSED',
+                Trade.timestamp >= sod
+            ).scalar()
+
+            self.daily_pnl = float(pnl_sum) if pnl_sum else 0.0
+            self.current_date = today
+            if self.daily_pnl != 0:
+                print(f"State Recovery: Recovered today's realized PnL: {self.daily_pnl:.2f}")
+        except Exception as e:
+            print(f"Error recovering PnL: {e}")
+        finally:
+            session.close()
+
     def reset_if_new_day(self, timestamp=None):
         if timestamp:
             date = timestamp.date() if hasattr(timestamp, 'date') else timestamp

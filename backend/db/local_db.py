@@ -78,7 +78,7 @@ class LocalDB:
                 full_feed JSON
             )
         """)
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_ticks_key_ts ON ticks (instrumentKey, ts_ms)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_ticks_date_key_ts ON ticks (date, instrumentKey, ts_ms)")
 
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS metadata (
@@ -325,8 +325,25 @@ class LocalDB:
             self.conn.execute(f"INSERT INTO pcr_history ({', '.join(cols)}) SELECT * FROM df_view_pcr")
             self.conn.unregister('df_view_pcr')
 
+    def repartition_ticks(self):
+        """
+        Physically re-orders the ticks table by date to maintain query performance as data grows.
+        This simulates daily partitioning in DuckDB's columnar storage.
+        """
+        with self._execute_lock:
+            try:
+                logger.info("Repartitioning ticks table by date...")
+                self.conn.execute("CREATE TABLE IF NOT EXISTS ticks_temp AS SELECT * FROM ticks ORDER BY date, instrumentKey, ts_ms")
+                self.conn.execute("DROP TABLE IF EXISTS ticks")
+                self.conn.execute("ALTER TABLE ticks_temp RENAME TO ticks")
+                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_ticks_date_key_ts ON ticks (date, instrumentKey, ts_ms)")
+                self.conn.execute("CHECKPOINT")
+                logger.info("Daily partitioning optimization complete.")
+            except Exception as e:
+                logger.error(f"Repartitioning error: {e}")
+
     def cleanup_old_data(self, days: int = 30):
-        """Deletes ticks older than X days to keep the DB size manageable."""
+        """Deletes ticks older than X days and re-partitions the table."""
         with self._execute_lock:
             try:
                 self.conn.execute(f"DELETE FROM ticks WHERE date < CURRENT_DATE - INTERVAL '{days} days'")
@@ -335,19 +352,11 @@ class LocalDB:
             except Exception as e:
                 logger.error(f"Cleanup error: {e}")
 
+        # Re-partition to maintain performance after deletion
+        self.repartition_ticks()
+
     def optimize_storage(self):
-        """Performs a vacuum-like optimization by re-sorting ticks by instrument and timestamp."""
-        with self._execute_lock:
-            try:
-                logger.info("Optimizing data storage for replay...")
-                # DuckDB doesn't have CLUSTER, so we recreate the table sorted
-                self.conn.execute("CREATE TABLE ticks_new AS SELECT * FROM ticks ORDER BY instrumentKey, ts_ms")
-                self.conn.execute("DROP TABLE ticks")
-                self.conn.execute("ALTER TABLE ticks_new RENAME TO ticks")
-                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_ticks_key_ts ON ticks (instrumentKey, ts_ms)")
-                self.conn.execute("CHECKPOINT")
-                logger.info("Storage optimization complete.")
-            except Exception as e:
-                logger.error(f"Optimization error: {e}")
+        """Performs a vacuum-like optimization by re-sorting ticks by date and timestamp."""
+        self.repartition_ticks()
 
 db = LocalDB()
