@@ -109,6 +109,7 @@ class ChartInstance {
         this.markers = [];
         this.drawings = [];
         this.lastCandle = null;
+        this.lastCandleTime = 0;
         this.showOIProfile = false;
         this.showIndicators = true; // Enabled by default
         this.oiLines = [];
@@ -246,6 +247,7 @@ class ChartInstance {
                 this.fullHistory.candles.set(ts, { ...c, time: ts });
             });
             this.lastCandle = data.candles[data.candles.length - 1];
+            this.lastCandleTime = this.lastCandle.time;
             this.renderData();
             this.chart.timeScale().fitContent();
         }
@@ -256,6 +258,10 @@ class ChartInstance {
             this.updateLegend(data.indicators);
         }
         if (this.showOIProfile) this.toggleOIProfile(true);
+
+        // Apply saved custom indicator script if present
+        const savedScript = localStorage.getItem('custom_indicator_script');
+        if (savedScript) this.applyCustomScript(savedScript);
 
         this.engine.dataManager.subscribe(this.symbol, this.interval);
         this.engine.updateUI();
@@ -324,6 +330,11 @@ class ChartInstance {
             ltq = 0;
         }
 
+        if (candleTime < this.lastCandleTime) {
+            // Out of order tick
+            return;
+        }
+
         if (!this.lastCandle || candleTime > this.lastCandle.time) {
             this.lastCandle = { time: candleTime, open: price, high: price, low: price, close: price, volume: ltq };
         } else if (candleTime === this.lastCandle.time) {
@@ -331,12 +342,10 @@ class ChartInstance {
             this.lastCandle.high = Math.max(this.lastCandle.high, price);
             this.lastCandle.low = Math.min(this.lastCandle.low, price);
             this.lastCandle.volume += ltq;
-        } else {
-            // Out of order tick, discard for chart update but could be stored if needed
-            return;
         }
 
         this.fullHistory.candles.set(this.lastCandle.time, { ...this.lastCandle });
+        this.lastCandleTime = this.lastCandle.time;
 
         const coloredUpdate = {
             ...this.lastCandle,
@@ -344,7 +353,12 @@ class ChartInstance {
             borderColor: this.getColorByRvol(this.lastCandle),
             wickColor: this.getColorByRvol(this.lastCandle)
         };
-        this.mainSeries.update(coloredUpdate);
+
+        try {
+            this.mainSeries.update(coloredUpdate);
+        } catch (e) {
+            console.warn(`[Chart] Realtime update failed at ${candleTime}:`, e.message);
+        }
         this.volumeSeries.update({
             time: this.lastCandle.time, value: this.lastCandle.volume,
             color: this.lastCandle.close >= this.lastCandle.open ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'
@@ -367,7 +381,7 @@ class ChartInstance {
                 this.fullHistory.candles.set(c.time, c);
 
                 // Safety: Only update series if time is >= last seen time
-                if (!this.lastCandle || c.time >= this.lastCandle.time) {
+                if (!this.lastCandle || c.time >= this.lastCandleTime) {
                     const coloredUpdate = {
                         ...c,
                         color: this.getColorByRvol(c),
@@ -382,10 +396,11 @@ class ChartInstance {
                             color: c.close >= c.open ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'
                         });
                         if (this.activeSymmetrySignal) this.updateSymmetryPnL();
+                        this.lastCandleTime = c.time;
+                        this.lastCandle = c;
                     } catch (e) {
                         console.warn(`[Chart] Update failed at ${c.time}:`, e.message);
                     }
-                    this.lastCandle = c;
                 }
             });
         }

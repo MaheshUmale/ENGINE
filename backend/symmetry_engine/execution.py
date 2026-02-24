@@ -22,7 +22,7 @@ class ExecutionEngine:
                 self.positions[trade.index_name] = {
                     'trade_id': trade.id,
                     'side': trade.instrument_key,
-                    'entry_price': trade.price / (1 + self.slippage), # Reverse slippage for internal tracking
+                    'entry_price': trade.price, # Use the actual price stored in DB
                     'quantity': trade.quantity,
                     'ce_key': trade.instrument_ce,
                     'pe_key': trade.instrument_pe,
@@ -81,7 +81,7 @@ class ExecutionEngine:
         self.positions[signal.index_name] = {
             'trade_id': trade.id,
             'side': signal.side,
-            'entry_price': signal.option_price,
+            'entry_price': entry_price, # Use the actual slippage-adjusted entry price
             'quantity': quantity,
             'ce_key': signal.details.get('ce_key'),
             'pe_key': signal.details.get('pe_key'),
