@@ -653,45 +653,46 @@ class ChartInstance {
 
         if (maxOI === 0) return;
 
-        const maxBarWidth = width * 0.3; // 30% of chart width
-        const barHeight = 6;
+        // Find local max delta for prominent scaling
+        let maxDelta = 0;
+        strikesInRange.forEach(s => maxDelta = Math.max(maxDelta, Math.abs(s.call - s.put)));
+
+        const totalBarMaxWidth = width * 0.25;
+        const deltaBarMaxWidth = width * 0.20;
+        const barHeight = 8;
 
         strikesInRange.forEach(item => {
             const { y, call, put } = item;
-            const base = Math.min(call, put);
             const delta = Math.abs(call - put);
             const isCallHeavier = call > put;
 
-            const baseLen = (base / maxOI) * maxBarWidth;
-            const deltaLen = (delta / maxOI) * maxBarWidth;
+            // 1. Calculate lengths
+            const totalLen = (Math.max(call, put) / maxOI) * totalBarMaxWidth;
+            // Independent scaling for delta to make even small differences visible
+            const deltaLen = maxDelta > 0 ? (delta / maxDelta) * deltaBarMaxWidth : 0;
 
-            // Draw Base Bar (Common OI)
-            ctx.fillStyle = 'rgba(148, 163, 184, 0.2)'; // Gray muted
-            ctx.fillRect(width - baseLen, y - barHeight/2, baseLen, barHeight);
+            // 2. Draw Total Background (Ghost Bar)
+            ctx.fillStyle = 'rgba(148, 163, 184, 0.15)';
+            ctx.fillRect(width - totalLen, y - barHeight/2, totalLen, barHeight);
 
-            // Draw Delta Bar (Prominent difference)
-            ctx.fillStyle = isCallHeavier ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.8)';
-            ctx.fillRect(width - baseLen - deltaLen, y - barHeight/2, deltaLen, barHeight);
+            // 3. Draw Difference Bar (Prominent)
+            // Color Red if Call dominated, Green if Put dominated
+            ctx.fillStyle = isCallHeavier ? 'rgba(239, 68, 68, 0.9)' : 'rgba(34, 197, 94, 0.9)';
+            ctx.fillRect(width - deltaLen, y - barHeight/2, deltaLen, barHeight);
 
-            // Boundary line between base and delta
-            if (delta > 0 && base > 0) {
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(width - baseLen, y - barHeight/2);
-                ctx.lineTo(width - baseLen, y + barHeight/2);
-                ctx.stroke();
-            }
+            // Highlight edge of delta
+            ctx.strokeStyle = isCallHeavier ? '#ef4444' : '#22c55e';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(width - deltaLen, y - barHeight/2, deltaLen, barHeight);
 
-            // Labels
-            ctx.fillStyle = '#94a3b8';
-            ctx.font = 'bold 8px Arial';
-            ctx.textAlign = 'right';
-            const totalM = ((call + put) / 1000000).toFixed(1);
+            // 4. Labels
             const deltaM = (delta / 1000000).toFixed(1);
-
-            if (deltaLen > 20) {
-                ctx.fillText(`${deltaM}M Δ`, width - baseLen - deltaLen - 5, y + 3);
+            if (delta > 0) {
+                ctx.fillStyle = isCallHeavier ? '#fca5a5' : '#86efac';
+                ctx.font = 'black 9px sans-serif';
+                ctx.textAlign = 'right';
+                // Show delta value prominently
+                ctx.fillText(`${deltaM}M Δ`, width - Math.max(deltaLen, totalLen) - 5, y + 3);
             }
         });
     }
