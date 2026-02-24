@@ -201,7 +201,7 @@ async def tv_search(text: str = Query(..., min_length=1)):
 
     # Merge options
     upper_text = search_text.upper()
-    underlying = next((idx for idx in ["NIFTY", "BANKNIFTY", "FINNIFTY"] if idx in upper_text), None)
+    underlying = next((idx for idx in ["NIFTY", "BANKNIFTY"] if idx in upper_text), None)
     if not underlying and 3 <= len(upper_text) <= 15 and upper_text.isalpha(): underlying = upper_text
 
     if underlying:
@@ -259,7 +259,7 @@ async def get_intraday(
         # Prioritize Upstox for BSE (delay) and all Indices (speed/sync)
         providers = historical_data_registry.get_all()
         hrn = symbol_mapper.get_hrn(clean_key)
-        is_index = "INDEX" in clean_key or hrn in ["NIFTY", "BANKNIFTY", "FINNIFTY", "INDIA VIX"] or "BSE:" in clean_key
+        is_index = "INDEX" in clean_key or hrn in ["NIFTY", "BANKNIFTY", "INDIA VIX"] or "BSE:" in clean_key
         if is_index:
             providers = sorted(providers, key=lambda p: 20 if "Upstox" in type(p).__name__ else 10, reverse=True)
 
