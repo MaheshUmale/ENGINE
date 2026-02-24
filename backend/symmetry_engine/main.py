@@ -179,8 +179,14 @@ class TradingBot:
         if index_name in self.execution.positions:
             pos = self.execution.positions[index_name]
             idx_data = engine.current_data.get(instruments['index'], {})
-            ce_data = engine.current_data.get(instruments['ce'], {})
-            pe_data = engine.current_data.get(instruments['pe'], {})
+
+            # Use the specific strikes from the position, not the current ATM
+            # This ensures we check exit conditions on the strike we actually own
+            pos_ce_key = pos.get('ce_key')
+            pos_pe_key = pos.get('pe_key')
+
+            ce_data = engine.current_data.get(pos_ce_key, {}) if pos_ce_key else engine.current_data.get(instruments['ce'], {})
+            pe_data = engine.current_data.get(pos_pe_key, {}) if pos_pe_key else engine.current_data.get(instruments['pe'], {})
 
             # Sync trailing SL from StrategyEngine to ExecutionEngine/DB
             current_sl = engine.trailing_sl.get(index_name, 0)
@@ -189,16 +195,21 @@ class TradingBot:
 
             from types import SimpleNamespace
             if engine.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data):
-                exit_price = ce_data.get('ltp') if pos['side'] == 'BUY_CE' else pe_data.get('ltp')
-                bid = ce_data.get('bid') if pos['side'] == 'BUY_CE' else pe_data.get('bid')
+                # Ensure we have a valid price for exit
+                active_data = ce_data if pos['side'] == 'BUY_CE' else pe_data
+                exit_price = active_data.get('ltp', 0)
+                bid = active_data.get('bid', 0)
 
-                trade = self.execution.close_position(index_name, exit_price, index_price=idx_data.get('ltp'), bid=bid)
-                if trade:
-                    engine.reset_trailing_sl()
-                    self.risk_manager.update_pnl(trade.pnl)
-                    asyncio.create_task(self.alert_manager.send_notification(
-                        f"<b>TRADE CLOSED</b>\nIndex: {index_name}\nPnL: {trade.pnl:.2f}"
-                    ))
+                if exit_price > 0:
+                    trade = self.execution.close_position(index_name, exit_price, index_price=idx_data.get('ltp'), bid=bid)
+                    if trade:
+                        engine.reset_trailing_sl()
+                        self.risk_manager.update_pnl(trade.pnl)
+                        asyncio.create_task(self.alert_manager.send_notification(
+                            f"<b>TRADE CLOSED</b>\nIndex: {index_name}\nPnL: {trade.pnl:.2f}"
+                        ))
+                else:
+                    print(f"EXIT TRIGGERED but price is 0 for {index_name}. Waiting for valid tick.")
 
     async def recover_state(self):
         """
@@ -248,6 +259,19 @@ class TradingBot:
                         engine.trailing_sl[index_name] = pos['trailing_sl']
                         print(f"State Recovery: Recovered trailing SL for {index_name}: {pos['trailing_sl']}")
 
+                    # Fetch history for position strikes to enable immediate ATR calculation
+                    for side in ['ce_key', 'pe_key']:
+                        key = pos.get(side)
+                        if key:
+                            print(f"State Recovery: Fetching history for position strike {key}")
+                            hist = await self.data_provider.get_historical_data(key, interval=1)
+                            if hist is not None and not hist.empty:
+                                for _, row in hist.tail(20).iterrows():
+                                    engine.update_candle(key, {
+                                        'open': row['open'], 'high': row['high'],
+                                        'low': row['low'], 'close': row['close']
+                                    })
+
             print("State Recovery: Complete.")
         except Exception as e:
             print(f"Error during state recovery: {e}")
@@ -295,9 +319,16 @@ class TradingBot:
 
                     # Update subscriptions
                     new_keys = [details['ce'], details['pe']]
+
+                    # Protect active position strikes from unsubscription
+                    protected_keys = []
+                    for pos in self.execution.positions.values():
+                        if pos.get('ce_key'): protected_keys.append(pos['ce_key'])
+                        if pos.get('pe_key'): protected_keys.append(pos['pe_key'])
+
                     if old_details:
                         old_keys = [old_details['ce'], old_details['pe']]
-                        to_unsubscribe = [k for k in old_keys if k not in new_keys]
+                        to_unsubscribe = [k for k in old_keys if k not in new_keys and k not in protected_keys]
                         if to_unsubscribe:
                             self.data_provider.unsubscribe(to_unsubscribe)
 

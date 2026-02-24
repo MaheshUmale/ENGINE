@@ -371,7 +371,10 @@
                             ${t.side}
                         </span>
                     </td>
-                    <td class="p-4 font-mono text-right">${t.price.toFixed(2)}</td>
+                    <td class="p-4 font-mono text-right">
+                        ${t.price.toFixed(2)}
+                        ${t.exit_price ? `<br><span class="text-[8px] text-gray-500">Exit: ${t.exit_price.toFixed(2)}</span>` : ''}
+                    </td>
                     <td class="p-4 text-right font-black ${t.pnl > 0 ? 'text-green-500' : t.pnl < 0 ? 'text-red-500' : 'text-gray-600'}">${t.pnl ? t.pnl.toFixed(2) : '-'}</td>
                     <td class="p-4">
                          <span class="text-[9px] uppercase tracking-tighter ${t.status === 'CLOSED' ? 'text-gray-500' : 'text-blue-500 animate-pulse'}">${t.status}</span>
