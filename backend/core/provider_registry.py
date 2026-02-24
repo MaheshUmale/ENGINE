@@ -68,13 +68,16 @@ def initialize_default_providers():
         live_stream_registry.register("upstox", UpstoxLiveStreamProvider(), priority=20)
 
     # Options Data
+    # Upstox is preferred for live and backtest accuracy if token is available
+    if UPSTOX_ACCESS_TOKEN:
+        options_data_registry.register("upstox", UpstoxOptionsProvider(), priority=30)
+
     options_data_registry.register("trendlyne", TrendlyneOptionsProvider(), priority=20)
     options_data_registry.register("nse", NSEOptionsProvider(), priority=5)
-    if UPSTOX_ACCESS_TOKEN:
-        options_data_registry.register("upstox", UpstoxOptionsProvider(), priority=10)
 
     # Historical Data
-    # TradingView is preferred for charts due to reliable volume and multiple timeframes
-    historical_data_registry.register("tradingview", TradingViewHistoricalProvider(), priority=20)
+    # Upstox is preferred when available for accuracy and speed in backtesting
     if UPSTOX_ACCESS_TOKEN:
-        historical_data_registry.register("upstox", UpstoxHistoricalProvider(), priority=10)
+        historical_data_registry.register("upstox", UpstoxHistoricalProvider(), priority=30)
+
+    historical_data_registry.register("tradingview", TradingViewHistoricalProvider(), priority=20)

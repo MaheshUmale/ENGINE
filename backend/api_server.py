@@ -269,7 +269,7 @@ async def get_intraday(
 
         for provider in providers:
             try:
-                candles = await provider.get_hist_candles(clean_key, interval, 1000)
+                candles = await provider.get_hist_candles(clean_key, interval, 5000)
                 if candles and len(candles) > 0:
                     break
             except Exception as e:
