@@ -518,7 +518,7 @@ class OptionsManager:
                     logger.warning(f"Failed to add symbols to WSS client: {e}")
             logger.debug(f"Dynamic ATM tracking updated for {underlying}: {len(new_monitored_symbols)} symbols across {len(self.wss_clients[underlying])} providers")
 
-    async def take_snapshot(self, underlying: str):
+    async def take_snapshot(self, underlying: str, reference_date: str = None):
         """Take enhanced snapshot with all metrics."""
         tl_symbol = self.tl_symbol_map.get(underlying)
         if not tl_symbol:
@@ -533,7 +533,7 @@ class OptionsManager:
 
             wss_data = self.latest_chains.get(underlying, {})
 
-            oi_data, default_expiry, oi_source = await self._fetch_oi_data(underlying)
+            oi_data, default_expiry, oi_source = await self._fetch_oi_data(underlying, reference_date=reference_date)
 
             if not oi_data:
                 return await self._take_snapshot_tv(underlying, spot_price=spot_price)
@@ -625,7 +625,7 @@ class OptionsManager:
             logger.error(f"CRITICAL: Could not discover any Spot Price for {underlying}")
         return 0
 
-    async def _fetch_oi_data(self, underlying: str) -> tuple:
+    async def _fetch_oi_data(self, underlying: str, reference_date: str = None) -> tuple:
         """Fetch OI data using Registry with automatic failover."""
         ist = pytz.timezone('Asia/Kolkata')
         now_ist = datetime.now(ist)
@@ -635,7 +635,11 @@ class OptionsManager:
             try:
                 expiries = await provider.get_expiry_dates(underlying)
                 if expiries:
-                    default_expiry = expiries[0]
+                    # Select appropriate expiry: nearest one >= reference_date
+                    target_date = reference_date if reference_date else datetime.now().strftime("%Y-%m-%d")
+                    valid_expiries = [e for e in expiries if e >= target_date]
+                    default_expiry = valid_expiries[0] if valid_expiries else expiries[0]
+
                     data = await provider.get_oi_data(underlying, default_expiry, ts_str)
                     if data and data.get('head', {}).get('status') == '0':
                         oi_data = data.get('body', {}).get('oiData', {})

@@ -24,20 +24,21 @@ class DataProvider:
         """Fetch historical candles using Unified App's registry."""
         try:
             # interval 1m is supported. Unified app uses '1', '5' etc.
-            # count is defaulted to 1000 in unified app providers
+            # Request up to 5000 candles to support multi-day backtests
+            count = 5000
             provider = historical_data_registry.get_primary()
             if not provider:
                 logger.error("No historical provider available")
                 return None
 
-            # Use 1000 as default count, but support date range if provider does
+            # Support date range if provider does
             if hasattr(provider, 'get_hist_candles'):
                 import inspect
                 sig = inspect.signature(provider.get_hist_candles)
                 if 'from_date' in sig.parameters:
-                    candles = await provider.get_hist_candles(instrument_key, str(interval), 1000, from_date=from_date, to_date=to_date)
+                    candles = await provider.get_hist_candles(instrument_key, str(interval), count, from_date=from_date, to_date=to_date)
                 else:
-                    candles = await provider.get_hist_candles(instrument_key, str(interval), 1000)
+                    candles = await provider.get_hist_candles(instrument_key, str(interval), count)
             else:
                 return None
 
@@ -70,8 +71,8 @@ class DataProvider:
 
             if not chain or spot == 0:
                 # If chain not in DB, try taking a snapshot now
-                logger.info(f"Chain not found in DB for {underlying}, taking snapshot...")
-                await options_manager.take_snapshot(underlying)
+                logger.info(f"Chain not found in DB for {underlying}, taking snapshot (ref={reference_date})...")
+                await options_manager.take_snapshot(underlying, reference_date=reference_date)
                 chain_res = options_manager.get_chain_with_greeks(underlying)
                 chain = chain_res.get('chain', [])
                 spot = chain_res.get('spot_price', 0)

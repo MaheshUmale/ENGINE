@@ -40,7 +40,7 @@ class IOptionsDataProvider(ABC):
     """Interface for fetching options chain and OI data."""
 
     @abstractmethod
-    async def get_option_chain(self, underlying: str) -> Dict[str, Any]:
+    async def get_option_chain(self, underlying: str, reference_date: str = None) -> Dict[str, Any]:
         """Fetch the full option chain for an underlying."""
         pass
 

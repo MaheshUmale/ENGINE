@@ -168,6 +168,15 @@ class SymbolMapper:
 
     def to_upstox_key(self, internal_key: str) -> str:
         """Translates internal key (NSE:NIFTY) to Upstox key (NSE_INDEX|Nifty 50)."""
+        # If it already looks like an Upstox key, return it as is (preserving case)
+        if '|' in internal_key:
+            # Check if it's a known index but incorrectly cased
+            upper_key = internal_key.upper()
+            for k, v in UPSTOX_INDEX_MAP.items():
+                if v.upper() == upper_key:
+                    return v # Return correctly cased index key
+            return internal_key
+
         key = internal_key.upper()
 
         # Check dynamic mapping first
@@ -180,6 +189,12 @@ class SymbolMapper:
         # Default mapping for equity/options if they follow common patterns
         # Upstox Equities: NSE_EQ|INE... or NSE_EQ|SYMBOL
         # Upstox F&O: NSE_FO|KEY
+
+        # If it looks like an F&O symbol (e.g. NIFTY26...) and has no prefix, add NSE_FO|
+        import re
+        if not '|' in key and re.match(r'^(NIFTY|BANKNIFTY|FINNIFTY|RELIANCE|HDFCBANK)\d{2}', key):
+            return f"NSE_FO|{key}"
+
         return key.replace(':', '|')
 
     def from_upstox_key(self, upstox_key: str) -> str:

@@ -56,10 +56,10 @@ class TradingViewAPI:
             logger.error(f"Failed to initialize TV Streamer: {e}")
             self.streamer = None
 
-    def get_hist_candles(self, symbol_or_hrn, interval_min='1', n_bars=1000):
+    def get_hist_candles(self, symbol_or_hrn, interval_min='1', n_bars=5000):
         try:
             from core.symbol_mapper import symbol_mapper
-            logger.info(f"Fetching historical candles for {symbol_or_hrn}")
+            logger.info(f"Fetching historical candles for {symbol_or_hrn} (bars={n_bars})")
             if not symbol_or_hrn: return None
 
             tv_symbol = symbol_or_hrn
@@ -72,10 +72,20 @@ class TradingViewAPI:
 
             # Normalize for map lookup
             lookup_key = symbol_or_hrn.upper().replace(':', '|')
+
             if lookup_key in self.symbol_map:
                 meta = self.symbol_map[lookup_key]
                 tv_symbol = meta['symbol']
                 tv_exchange = meta['exchange']
+            elif 'NIFTY BANK' in lookup_key or 'BANKNIFTY' in lookup_key:
+                tv_symbol = 'BANKNIFTY'
+                tv_exchange = 'NSE'
+            elif 'NIFTY 50' in lookup_key or 'NIFTY' in lookup_key:
+                tv_symbol = 'NIFTY'
+                tv_exchange = 'NSE'
+            elif 'INDIA VIX' in lookup_key or 'INDIAVIX' in lookup_key:
+                tv_symbol = 'INDIAVIX'
+                tv_exchange = 'NSE'
             else:
                 # Use symbol_mapper for generic index/symbol extraction
                 clean = symbol_mapper.get_symbol(symbol_or_hrn)
@@ -84,6 +94,8 @@ class TradingViewAPI:
                     tv_exchange = 'NSE'
                 elif clean:
                     tv_symbol = clean
+
+            logger.info(f"Mapped {symbol_or_hrn} -> {tv_exchange}:{tv_symbol}")
 
             # 1. Try tvDatafeed first for historical data (more stable for one-offs)
             if self.tv:

@@ -58,7 +58,7 @@ class TrendlyneOptionsProvider(IOptionsDataProvider):
             "NSE:BANKNIFTY": "BANKNIFTY"
         }
 
-    async def get_option_chain(self, underlying: str) -> Dict[str, Any]:
+    async def get_option_chain(self, underlying: str, reference_date: str = None) -> Dict[str, Any]:
         # Trendlyne uses OI data for chain, but let's use TV for the full chain structure if needed
         # Or implement a hybrid if Trendlyne provides it. For now, focus on OI.
         return await fetch_option_chain(underlying)
@@ -80,7 +80,7 @@ class TrendlyneOptionsProvider(IOptionsDataProvider):
 
 class NSEOptionsProvider(IOptionsDataProvider):
     """NSE India Direct Implementation for Options data."""
-    async def get_option_chain(self, underlying: str) -> Dict[str, Any]:
+    async def get_option_chain(self, underlying: str, reference_date: str = None) -> Dict[str, Any]:
         symbol = underlying.split(':')[-1]
         data = await asyncio.to_thread(fetch_nse_oi_data, symbol)
         # Transform NSE format to a unified format if necessary
@@ -178,8 +178,8 @@ class UpstoxLiveStreamProvider(ILiveStreamProvider):
 
 class UpstoxOptionsProvider(IOptionsDataProvider):
     """Upstox API Implementation for Options data."""
-    async def get_option_chain(self, underlying: str) -> Dict[str, Any]:
-        return await upstox_api_client.get_option_chain(underlying)
+    async def get_option_chain(self, underlying: str, reference_date: str = None) -> Dict[str, Any]:
+        return await upstox_api_client.get_option_chain(underlying, reference_date=reference_date)
 
     async def get_expiry_dates(self, underlying: str) -> List[str]:
         return await upstox_api_client.get_expiry_dates(underlying)

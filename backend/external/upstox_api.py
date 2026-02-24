@@ -17,7 +17,7 @@ class UpstoxAPIClient:
         self.configuration.access_token = access_token
         self.api_client = upstox_client.ApiClient(self.configuration)
 
-    async def get_hist_candles(self, symbol: str, interval: str, count: int, from_date: str = None, to_date: str = None) -> List[List]:
+    async def get_hist_candles(self, symbol: str, interval: str, count: int = 5000, from_date: str = None, to_date: str = None) -> List[List]:
         """Fetch historical candles from Upstox with client-side aggregation for unsupported timeframes."""
         supported_intervals = ["1", "30", "1D", "1W", "1M", "D", "W"]
 
@@ -99,7 +99,11 @@ class UpstoxAPIClient:
                 if is_index:
                     try:
                         from .tv_api import tv_api
-                        tv_candles = await asyncio.to_thread(tv_api.get_hist_candles, symbol, interval, count + 50)
+                        # Use a timeout for TV volume to avoid blocking the whole process
+                        tv_candles = await asyncio.wait_for(
+                            asyncio.to_thread(tv_api.get_hist_candles, symbol, interval, max(count, len(formatted)) + 50),
+                            timeout=30.0
+                        )
                         if tv_candles:
                             # Map TV candles by timestamp
                             tv_map = {c[0]: c[5] for c in tv_candles} # ts -> volume
@@ -116,17 +120,22 @@ class UpstoxAPIClient:
             logger.error(f"Error in Upstox get_hist_candles: {e}")
             return []
 
-    async def get_option_chain(self, underlying: str) -> Dict[str, Any]:
+    async def get_option_chain(self, underlying: str, reference_date: str = None) -> Dict[str, Any]:
         """Fetch option chain for an underlying."""
         try:
             instrument_key = symbol_mapper.to_upstox_key(underlying)
-            logger.info(f"Upstox fetching option chain for {underlying} ({instrument_key})")
+            logger.info(f"Upstox fetching option chain for {underlying} ({instrument_key}) reference={reference_date}")
             options_api = upstox_client.OptionsApi(self.api_client)
             expiries = await self.get_expiry_dates(underlying)
             if not expiries:
                 logger.warning(f"No expiries found for {underlying}")
                 return {}
-            expiry = expiries[0]
+
+            # Select appropriate expiry: nearest one >= reference_date
+            target_date = reference_date if reference_date else datetime.now().strftime("%Y-%m-%d")
+            valid_expiries = [e for e in expiries if e >= target_date]
+            expiry = valid_expiries[0] if valid_expiries else expiries[0]
+
             logger.info(f"Using expiry {expiry} for {underlying}")
 
             # Handle if expiry is already a date/datetime object
@@ -159,18 +168,38 @@ class UpstoxAPIClient:
 
                     if item.call_options:
                         co = item.call_options
+                        u_key = co.instrument_key
+                        if '|' not in u_key: u_key = f"NSE_FO|{u_key}"
+
+                        # Match TV scanner format for OptionsManager fallback
+                        # [name, desc, type, strike, volume, ltp, expiration, ask, bid, delta, gamma, iv, theta, vega]
+                        row = [
+                            u_key, f"{base_symbol} {expiry_str} CE {strike_str}", "call", strike,
+                            int(co.market_data.volume if co.market_data else 0),
+                            float(co.market_data.ltp if co.market_data else 0),
+                            expiry_ts, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+                        ]
+
                         # Construct internal symbol: NSE:NIFTY260224C25700
                         internal_symbol = f"NSE:{base_symbol}{yy}{mm}{dd}C{strike_str}"
-                        symbol_mapper.register_mapping(internal_symbol, co.instrument_key)
-
-                        standard_data["symbols"].append({"f": [co.instrument_key, str(strike), "call", 0.0, float(co.market_data.ltp if co.market_data else 0), int(co.market_data.volume if co.market_data else 0), int(co.market_data.oi if co.market_data else 0), 0, expiry_ts, 0.0, 0.0, 0.0, 0.0, 0.0]})
+                        symbol_mapper.register_mapping(internal_symbol, u_key)
+                        standard_data["symbols"].append({"f": row})
 
                     if item.put_options:
                         po = item.put_options
-                        internal_symbol = f"NSE:{base_symbol}{yy}{mm}{dd}P{strike_str}"
-                        symbol_mapper.register_mapping(internal_symbol, po.instrument_key)
+                        u_key = po.instrument_key
+                        if '|' not in u_key: u_key = f"NSE_FO|{u_key}"
 
-                        standard_data["symbols"].append({"f": [po.instrument_key, str(strike), "put", 0.0, float(po.market_data.ltp if po.market_data else 0), int(po.market_data.volume if po.market_data else 0), int(po.market_data.oi if po.market_data else 0), 0, expiry_ts, 0.0, 0.0, 0.0, 0.0, 0.0]})
+                        row = [
+                            u_key, f"{base_symbol} {expiry_str} PE {strike_str}", "put", strike,
+                            int(po.market_data.volume if po.market_data else 0),
+                            float(po.market_data.ltp if po.market_data else 0),
+                            expiry_ts, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+                        ]
+
+                        internal_symbol = f"NSE:{base_symbol}{yy}{mm}{dd}P{strike_str}"
+                        symbol_mapper.register_mapping(internal_symbol, u_key)
+                        standard_data["symbols"].append({"f": row})
                 return standard_data
             return {}
         except Exception as e:
