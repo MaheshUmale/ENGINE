@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Upstox Access Token
-ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN", "")
+ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN", "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI3NkFGMzUiLCJqdGkiOiI2OTlkMTZlY2YxODdhOTZmZWIwNjQ3NmUiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MTkwMjcwMCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcxOTcwNDAwfQ.ACiFI05Qa-_rGJJc6jqiHzK60FZfpttbreFjwNVqQJ8")
 
 
 # Strategy Parameters
@@ -25,7 +25,9 @@ INDICES = {
 }
 
 # Database Config
-DB_PATH = 'data/trading_engine.db'
+# Resolve absolute path relative to project root
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DB_PATH = os.path.join(BASE_DIR, 'data', 'trading_engine.db')
 
 # Strategy Specifics
 SWING_WINDOW = 15  # 15 minutes rolling swing

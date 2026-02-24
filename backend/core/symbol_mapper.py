@@ -18,17 +18,14 @@ class SymbolMapper:
     _mapping_cache: Dict[str, str] = {
         "NSE_INDEX|NIFTY 50": "NIFTY",
         "NSE_INDEX|NIFTY BANK": "BANKNIFTY",
-        "NSE_INDEX|NIFTY FIN SERVICE": "FINNIFTY",
         "NSE_INDEX|INDIA VIX": "INDIA VIX",
         "NSE|NIFTY": "NIFTY",
         "NSE|BANKNIFTY": "BANKNIFTY",
-        "NSE|CNXFINANCE": "FINNIFTY",
         "NSE|INDIAVIX": "INDIA VIX"
     } # instrument_key -> HRN
     _reverse_cache: Dict[str, str] = {
         "NIFTY": "NSE|NIFTY",
         "BANKNIFTY": "NSE|BANKNIFTY",
-        "FINNIFTY": "NSE|CNXFINANCE",
         "INDIA VIX": "NSE|INDIAVIX"
     } # HRN -> instrument_key
 
@@ -89,7 +86,6 @@ class SymbolMapper:
 
         if "NIFTY 50" in symbol: symbol = "NIFTY"
         if "NIFTY BANK" in symbol: symbol = "BANKNIFTY"
-        if "NIFTY FIN SERVICE" in symbol: symbol = "FINNIFTY"
 
         strike = meta.get('strike')
         expiry = meta.get('expiry') # YYYY-MM-DD
@@ -142,7 +138,7 @@ class SymbolMapper:
         return None
 
     def get_symbol(self, key_or_hrn: str) -> str:
-        """Extracts the base symbol (NIFTY, BANKNIFTY, FINNIFTY) from a key or HRN."""
+        """Extracts the base symbol (NIFTY, BANKNIFTY) from a key or HRN."""
         if not key_or_hrn: return ""
 
         target = key_or_hrn.upper().replace(':', '|').strip()
@@ -150,8 +146,6 @@ class SymbolMapper:
         # 1. Handle Indices
         if "NIFTY BANK" in target or "BANKNIFTY" in target:
             return "BANKNIFTY"
-        if "FIN SERVICE" in target or "FINNIFTY" in target:
-            return "FINNIFTY"
         if "NIFTY" in target:
             return "NIFTY"
         if "INDIA VIX" in target or "INDIAVIX" in target:

@@ -56,12 +56,15 @@ class Trade(Base):
     timestamp = Column(DateTime)
     index_name = Column(String)
     instrument_key = Column(String)
+    instrument_ce = Column(String)
+    instrument_pe = Column(String)
     side = Column(String)  # 'BUY' or 'SELL'
     price = Column(Float)
     index_price = Column(Float)
     quantity = Column(Integer)
     status = Column(String)  # 'OPEN', 'CLOSED'
     pnl = Column(Float, default=0.0)
+    trailing_sl = Column(Float, default=0.0)
 
 class Notification(Base):
     __tablename__ = 'notifications'
@@ -79,6 +82,10 @@ engine = create_engine(f'sqlite:///{DB_PATH}')
 Session = sessionmaker(bind=engine)
 
 def init_db():
+    import os
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
     Base.metadata.create_all(engine)
 
 def get_session():

@@ -41,15 +41,13 @@ LOGGING_CONFIG = {
 # Options Configuration
 OPTIONS_UNDERLYINGS: List[str] = [
     "NSE:NIFTY",
-    "NSE:BANKNIFTY",
-    "NSE:FINNIFTY"
+    "NSE:BANKNIFTY"
 ]
 
 # Initial instruments for WebSocket feed
 INITIAL_INSTRUMENTS: List[str] = [
     "NSE:NIFTY",
-    "NSE:BANKNIFTY",
-    "NSE:FINNIFTY"
+    "NSE:BANKNIFTY"
 ]
 
 # Greeks Calculator Configuration
@@ -109,11 +107,10 @@ STRATEGY_CONFIG = {
 }
 
 # Upstox Configuration
-UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN", "")
+UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN", "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI3NkFGMzUiLCJqdGkiOiI2OTlkMTZlY2YxODdhOTZmZWIwNjQ3NmUiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MTkwMjcwMCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcxOTcwNDAwfQ.ACiFI05Qa-_rGJJc6jqiHzK60FZfpttbreFjwNVqQJ8")
 UPSTOX_INDEX_MAP = {
     "NSE:NIFTY": "NSE_INDEX|Nifty 50",
     "NSE:BANKNIFTY": "NSE_INDEX|Nifty Bank",
-    "NSE:FINNIFTY": "NSE_INDEX|Nifty Fin Service",
     "BSE:SENSEX": "BSE_INDEX|SENSEX",
     "BSE:BANKEX": "BSE_INDEX|BANKEX",
 }

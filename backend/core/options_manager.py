@@ -45,8 +45,7 @@ class OptionsManager:
         self.active_underlyings = OPTIONS_UNDERLYINGS
         self.tl_symbol_map = {
             "NSE:NIFTY": "NIFTY 50",
-            "NSE:BANKNIFTY": "BANKNIFTY",
-            "NSE:FINNIFTY": "FINNIFTY"
+            "NSE:BANKNIFTY": "BANKNIFTY"
         }
         self.running = False
         self._task = None
@@ -578,8 +577,6 @@ class OptionsManager:
                 target_keys.extend(["NSE_INDEX|NIFTY 50", "NSE|NIFTY", "NIFTY"])
             elif hrn == "BANKNIFTY":
                 target_keys.extend(["NSE_INDEX|NIFTY BANK", "NSE|BANKNIFTY", "BANKNIFTY"])
-            elif hrn == "FINNIFTY":
-                target_keys.extend(["NSE_INDEX|NIFTY FIN SERVICE", "NSE|CNXFINANCE", "FINNIFTY"])
 
             placeholders = ",".join(["?"] * len(target_keys))
             res = db.query(f"""

@@ -9,9 +9,7 @@ class TrendlyneAPI:
         'NIFTY': 1887,
         'NIFTY 50': 1887,
         'BANKNIFTY': 1898,
-        'BANK NIFTY': 1898,
-        'FINNIFTY': 1900,
-        'FIN NIFTY': 1900
+        'BANK NIFTY': 1898
     }
 
     def __init__(self):

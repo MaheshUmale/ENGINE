@@ -8,17 +8,47 @@ from .risk_manager import RiskManager
 from .config import INDICES, ENABLE_INDEX_SYNC
 
 class Backtester:
-    def __init__(self, index_name):
+    def __init__(self, index_name, db_path=None):
         self.index_name = index_name
         self.data_provider = DataProvider()
         self.engines = {name: StrategyEngine(name) for name in INDICES}
         self.strategy = self.engines[index_name]
+
+        # Use a separate database for backtest results to avoid destroying live data
+        from .database import create_engine, sessionmaker, Base
+        import os
+
+        self.db_path = db_path or "data/backtest_results.db"
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        self.engine = create_engine(f'sqlite:///{self.db_path}')
+        self.Session = sessionmaker(bind=self.engine)
+        Base.metadata.create_all(self.engine)
+
         self.execution = ExecutionEngine()
         self.risk_manager = RiskManager()
+        self.params = {}
+
+    def apply_params(self):
+        """Applies dynamic parameters to engines."""
+        if not self.params: return
+
+        swing_window = self.params.get('swing_window', 10)
+        # Update StrategyEngine logic to use these params
+        # Since SWING_WINDOW is currently imported from config, we'll need to override it
+        # or update the StrategyEngine to use instance variables.
+
+        # We will dynamically inject these into the strategy instance
+        self.strategy.swing_window = swing_window
+        self.strategy.confluence_threshold = self.params.get('confluence_threshold', 4)
+        self.strategy.atr_multiplier = self.params.get('atr_multiplier', 1.5)
+        self.enable_index_sync = self.params.get('enable_index_sync', True)
+
+    def get_backtest_session(self):
+        return self.Session()
 
     def clean_db(self):
-        print("Cleaning database for new backtest...")
-        session = get_session()
+        print(f"Cleaning backtest database at {self.db_path}...")
+        session = self.get_backtest_session()
         try:
             session.query(Trade).delete()
             session.query(Signal).delete()
@@ -27,14 +57,17 @@ class Backtester:
             session.query(RawTick).delete()
             session.commit()
         except Exception as e:
-            print(f"Error cleaning DB: {e}")
+            print(f"Error cleaning backtest DB: {e}")
             session.rollback()
         finally:
             session.close()
 
     async def run_backtest(self, from_date, to_date):
         self.clean_db()
-        print(f"Starting backtest for {self.index_name} from {from_date} to {to_date} (Index Sync: {ENABLE_INDEX_SYNC})")
+        self.apply_params()
+
+        enable_sync = getattr(self, 'enable_index_sync', ENABLE_INDEX_SYNC)
+        print(f"Starting backtest for {self.index_name} from {from_date} to {to_date} (Index Sync: {enable_sync})")
 
         # Determine range of dates - include 1 day prior for warm-up
         start_dt = pd.to_datetime(from_date) - datetime.timedelta(days=2) # 2 days to ensure at least 1 trading day
@@ -223,10 +256,11 @@ class Backtester:
 
                 # Signals (Only if not warmup)
                 if not is_warmup:
+                    # Inject params into generate_signals if needed or use modified StrategyEngine
                     signal = self.strategy.generate_signals(details)
                     if signal:
                         # Enhancement: Multi-Index Sync Check
-                        if ENABLE_INDEX_SYNC:
+                        if enable_sync:
                             other_sync = True
                             for other_name, other_engine in self.engines.items():
                                 if other_name == self.index_name: continue
@@ -241,8 +275,24 @@ class Backtester:
                             # Risk Check
                             can_trade, _ = self.risk_manager.can_trade(len(self.execution.positions), timestamp=current_time)
                             if can_trade:
-                                self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx'])
-                        session = get_session()
+                                # Override execution to use backtest session
+                                bt_session = self.get_backtest_session()
+                                # Temporarily monkey-patch get_session for execution and strategy
+                                import symmetry_engine.execution as exe_mod
+                                import symmetry_engine.strategy as strat_mod
+                                orig_exe_sess = exe_mod.get_session
+                                orig_strat_sess = strat_mod.get_session
+
+                                exe_mod.get_session = self.get_backtest_session
+                                strat_mod.get_session = self.get_backtest_session
+                                try:
+                                    self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx'])
+                                finally:
+                                    exe_mod.get_session = orig_exe_sess
+                                    strat_mod.get_session = orig_strat_sess
+                                    bt_session.close()
+
+                        session = self.get_backtest_session()
                         session.add(signal)
                         session.commit()
                         session.close()
@@ -267,7 +317,20 @@ class Backtester:
                     from types import SimpleNamespace
                     if self.strategy.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data):
                         exit_price = ce_data['ltp'] if pos['side'] == 'BUY_CE' else pe_data['ltp']
-                        trade = self.execution.close_position(self.index_name, exit_price, timestamp=current_time, index_price=current['close_idx'])
+
+                        import symmetry_engine.execution as exe_mod
+                        import symmetry_engine.strategy as strat_mod
+                        orig_exe_sess = exe_mod.get_session
+                        orig_strat_sess = strat_mod.get_session
+
+                        exe_mod.get_session = self.get_backtest_session
+                        strat_mod.get_session = self.get_backtest_session
+                        try:
+                            trade = self.execution.close_position(self.index_name, exit_price, timestamp=current_time, index_price=current['close_idx'])
+                        finally:
+                            exe_mod.get_session = orig_exe_sess
+                            strat_mod.get_session = orig_strat_sess
+
                         if trade:
                             self.strategy.reset_trailing_sl()
                             self.risk_manager.update_pnl(trade.pnl)
@@ -283,7 +346,7 @@ class Backtester:
         print(f"Backtest complete for {self.index_name}")
 
         # Calculate Performance KPIs
-        session = get_session()
+        session = self.get_backtest_session()
         closed_trades = session.query(Trade).filter_by(index_name=self.index_name, status='CLOSED', side='SELL').all()
         session.close()
 

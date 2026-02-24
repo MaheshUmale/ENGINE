@@ -20,21 +20,13 @@ class ExecutionEngine:
             for trade in open_trades:
                 self.positions[trade.index_name] = {
                     'trade_id': trade.id,
-                    'side': trade.instrument_key, # signal.side was stored here
+                    'side': trade.instrument_key,
                     'entry_price': trade.price / (1 + self.slippage), # Reverse slippage for internal tracking
-                    'quantity': trade.quantity
+                    'quantity': trade.quantity,
+                    'ce_key': trade.instrument_ce,
+                    'pe_key': trade.instrument_pe,
+                    'trailing_sl': trade.trailing_sl
                 }
-
-                # Try to recover ce_key/pe_key from Signal table for monitoring
-                from .database import Signal
-                last_signal = session.query(Signal).filter_by(
-                    index_name=trade.index_name,
-                    side=trade.instrument_key
-                ).order_by(Signal.timestamp.desc()).first()
-
-                if last_signal and last_signal.details:
-                    self.positions[trade.index_name]['ce_key'] = last_signal.details.get('ce_key')
-                    self.positions[trade.index_name]['pe_key'] = last_signal.details.get('pe_key')
 
             if self.positions:
                 print(f"State Recovery: Recovered {len(self.positions)} open positions.")
@@ -67,11 +59,14 @@ class ExecutionEngine:
             timestamp=ts,
             index_name=signal.index_name,
             instrument_key=signal.side, # Simplified for paper trading
+            instrument_ce=signal.details.get('ce_key'),
+            instrument_pe=signal.details.get('pe_key'),
             side='BUY',
             price=entry_price,
             index_price=index_price if index_price else signal.index_price,
             quantity=quantity,
-            status='OPEN'
+            status='OPEN',
+            trailing_sl=0.0
         )
         session.add(trade)
         session.commit()
@@ -88,6 +83,32 @@ class ExecutionEngine:
         print(f"Executed BUY for {signal.index_name}: {signal.side} at {signal.option_price}")
         session.close()
         return trade
+
+    def update_trailing_sl(self, index_name, new_sl):
+        """
+        Updates the trailing stop loss for an open position in the database.
+        """
+        if index_name not in self.positions:
+            return
+
+        pos = self.positions[index_name]
+        pos['trailing_sl'] = new_sl
+
+        def do_update():
+            session = get_session()
+            try:
+                trade = session.query(Trade).filter_by(id=pos['trade_id']).first()
+                if trade:
+                    trade.trailing_sl = new_sl
+                    session.commit()
+            except Exception as e:
+                print(f"Error updating trailing SL in DB: {e}")
+                session.rollback()
+            finally:
+                session.close()
+
+        import asyncio
+        asyncio.create_task(asyncio.to_thread(do_update))
 
     def close_position(self, index_name, current_price, timestamp=None, index_price=None):
         """

@@ -91,7 +91,7 @@ class UpstoxAPIClient:
                         logger.error(f"Aggregation failed: {e}")
 
                 # Hybrid Volume for Indices: Fetch from TradingView
-                is_index = any(idx in symbol.upper() for idx in ["NIFTY", "BANKNIFTY", "FINNIFTY"])
+                is_index = any(idx in symbol.upper() for idx in ["NIFTY", "BANKNIFTY"])
                 if is_index:
                     try:
                         from .tv_api import tv_api
@@ -143,7 +143,6 @@ class UpstoxAPIClient:
 
                 # Get base symbol like NIFTY from NSE:NIFTY
                 base_symbol = underlying.split(':')[-1]
-                if base_symbol == "CNXFINANCE": base_symbol = "FINNIFTY"
 
                 expiry_dt = datetime.fromtimestamp(expiry_ts)
                 yy = expiry_dt.strftime("%y")
