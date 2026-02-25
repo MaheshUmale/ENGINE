@@ -1,7 +1,12 @@
 import pandas as pd
 import datetime
 from .database import get_session, ReferenceLevel, Signal, RawTick
-from .config import SWING_WINDOW, CONFLUENCE_THRESHOLD
+from config import (
+    SYMMETRY_SWING_WINDOW as SWING_WINDOW,
+    SYMMETRY_CONFLUENCE_THRESHOLD as CONFLUENCE_THRESHOLD,
+    SYMMETRY_INDICES as INDICES,
+    SYMMETRY_SL_TRAILING as SL_TRAILING
+)
 
 class StrategyEngine:
     def __init__(self, index_name, session_factory=None):
@@ -324,7 +329,6 @@ class StrategyEngine:
         Exit when the Opposite Option stops making new lows and its OI starts falling.
         Includes ATR-based dynamic trailing stop loss.
         """
-        from .config import SL_TRAILING
         side = position.side
         active_opt_data = ce_data if side == 'BUY_CE' else pe_data
         opp_opt_data = pe_data if side == 'BUY_CE' else ce_data
@@ -430,7 +434,6 @@ class StrategyEngine:
         # However, we can find it in self.current_data if we know the index_name.
         # Actually, let's assume the index key is in current_data.
         # A better way is to pass the index_key or find it.
-        from .config import INDICES
         idx_key = INDICES[self.index_name]['index_key']
 
         if idx_key not in self.current_data:

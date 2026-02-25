@@ -1,5 +1,5 @@
 from .database import get_session, Trade
-from .config import INDICES
+from config import SYMMETRY_INDICES as INDICES
 import datetime
 import asyncio
 

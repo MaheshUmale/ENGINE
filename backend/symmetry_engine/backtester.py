@@ -6,7 +6,7 @@ from .strategy import StrategyEngine
 from .database import get_session, Trade, Signal, ReferenceLevel, Candle, RawTick
 from .execution import ExecutionEngine
 from .risk_manager import RiskManager
-from .config import INDICES, ENABLE_INDEX_SYNC
+from config import SYMMETRY_INDICES as INDICES, SYMMETRY_ENABLE_INDEX_SYNC as ENABLE_INDEX_SYNC
 
 class Backtester:
     def __init__(self, index_name, db_path=None):

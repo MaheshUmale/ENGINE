@@ -5,7 +5,7 @@ import logging
 from core.provider_registry import historical_data_registry, options_data_registry
 from core.options_manager import options_manager
 from core.symbol_mapper import symbol_mapper
-from .config import ACCESS_TOKEN, INDICES
+from config import UPSTOX_ACCESS_TOKEN as ACCESS_TOKEN, SYMMETRY_INDICES as INDICES
 from .database import get_session, RawTick, Candle
 
 logger = logging.getLogger(__name__)

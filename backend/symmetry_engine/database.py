@@ -2,7 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, 
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 import datetime
-from .config import DB_PATH
+from config import SYMMETRY_DB_PATH as DB_PATH
 
 Base = declarative_base()
 
