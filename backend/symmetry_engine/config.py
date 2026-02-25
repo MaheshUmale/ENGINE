@@ -4,7 +4,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Upstox Access Token
-ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN", "")
+# ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN", "")
+UPSTOX_ACCESS_TOKEN ='eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI3NkFGMzUiLCJqdGkiOiI2OTllNzU5ZTBlYWIzMzMxMDM0MDg4MmUiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MTk5MjQ3OCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcyMDU2ODAwfQ.C3NczS3N3g-jw0ySiBu4oAO4OuP4y94tw5KFDM4yS-M'
+ACCESS_TOKEN=UPSTOX_ACCESS_TOKEN
 
 
 # Strategy Parameters
