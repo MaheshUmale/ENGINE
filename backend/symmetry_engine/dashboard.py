@@ -6,7 +6,7 @@ import pandas as pd
 import os
 import json
 import plotly.graph_objects as go
-from .config import DB_PATH
+from config import SYMMETRY_DB_PATH as DB_PATH
 from .database import get_session, AppSetting, Notification
 import uvicorn
 app = FastAPI(title="Symmetry Engine Dashboard")

@@ -191,3 +191,38 @@ UI_CONFIG = {
     "chart_history_days": 30,
     "max_strikes_displayed": 50
 }
+
+# ==============================================================================
+# SYMMETRY ENGINE CONFIGURATION
+# ==============================================================================
+
+# Strategy Parameters
+SYMMETRY_TIMEFRAMES = [1, 3, 5]  # In minutes
+SYMMETRY_STRIKE_UPDATE_INTERVAL = 300  # 5 minutes in seconds
+SYMMETRY_STRIKE_UPDATE_THRESHOLD = 25  # Index move in points
+
+# Instruments to monitor
+SYMMETRY_INDICES = {
+    'NIFTY': {
+        'index_key': 'NSE_INDEX|Nifty 50',
+        'lot_size': 75
+    },
+    'BANKNIFTY': {
+        'index_key': 'NSE_INDEX|Nifty Bank',
+        'lot_size': 15
+    }
+}
+
+# Database Config for Symmetry Engine
+SYMMETRY_DB_PATH = os.path.join('data', 'trading_engine.db')
+
+# Strategy Specifics
+SYMMETRY_SWING_WINDOW = 15  # 15 minutes rolling swing
+SYMMETRY_CONFLUENCE_THRESHOLD = 4  # All 4 conditions must be met
+
+# Paper Trading Config
+SYMMETRY_INITIAL_BALANCE = 1000000
+SYMMETRY_SL_TRAILING = True
+
+# Enhancement: Multi-Index Sync
+SYMMETRY_ENABLE_INDEX_SYNC = True

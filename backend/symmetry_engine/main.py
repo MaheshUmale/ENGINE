@@ -6,7 +6,12 @@ from .strategy import StrategyEngine
 from .execution import ExecutionEngine
 from .risk_manager import RiskManager
 from .alerts import AlertManager
-from .config import INDICES, ACCESS_TOKEN, SWING_WINDOW, ENABLE_INDEX_SYNC
+from config import (
+    SYMMETRY_INDICES as INDICES,
+    UPSTOX_ACCESS_TOKEN as ACCESS_TOKEN,
+    SYMMETRY_SWING_WINDOW as SWING_WINDOW,
+    SYMMETRY_ENABLE_INDEX_SYNC as ENABLE_INDEX_SYNC
+)
 from .database import init_db, get_session, RawTick, Candle
 
 class TradingBot:
