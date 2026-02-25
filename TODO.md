@@ -20,6 +20,6 @@ This list tracks the remaining features and planned upgrades for the ProDesk Tra
 - [ ] **Strategy Marketplace**: Allow users to save and share their strategy builder configurations as JSON templates.
 
 ## 🛠️ Maintenance & Optimization
-- [ ] **DuckDB Partitioning**: Implement daily partitioning for the `ticks` table in DuckDB to maintain query performance as data grows.
+- [x] **DuckDB Partitioning**: Implement daily partitioning for the `ticks` table in DuckDB to maintain query performance as data grows (Implemented via repartition_ticks).
 - [ ] **WebSocket Load Balancing**: Prepare the `DataEngine` to handle multi-instance distribution for high-symbol-count environments.
 - [ ] **Unit Test Suite**: Expand the `tests/` directory to cover core strategy logic and Greeks calculation accuracy.

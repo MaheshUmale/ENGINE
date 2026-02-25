@@ -24,8 +24,6 @@ class TradingBot:
         self.instruments = {}
         self.candle_buffers = {} # instrument -> interval -> current_candle
         self.candle_buffers_5m = {} # instrument -> current_candle
-        self.tick_batch = []
-        self.last_batch_save = datetime.datetime.now()
         self.loop = loop or asyncio.get_event_loop()
 
     def handle_tick_sync(self, feeds):
@@ -43,11 +41,6 @@ class TradingBot:
             vtt = data.get('upstox_volume') or data.get('tv_volume') or data.get('ltq', 0)
 
             if ltp is None: continue
-
-            # Batch raw tick for better performance
-            self.tick_batch.append(RawTick(instrument_key=key, ltp=ltp, volume=vtt, oi=oi))
-            if len(self.tick_batch) >= 100 or (datetime.datetime.now() - self.last_batch_save).seconds > 5:
-                await self.save_tick_batch()
 
             # Update engine with latest tick data
             for index_name, engine in self.engines.items():
@@ -282,23 +275,6 @@ class TradingBot:
             print(f"Error during state recovery: {e}")
         finally:
             session.close()
-
-    async def save_tick_batch(self):
-        if not self.tick_batch: return
-        batch = self.tick_batch.copy()
-        self.tick_batch = []
-        self.last_batch_save = datetime.datetime.now()
-
-        def do_save():
-            try:
-                session = get_session()
-                session.add_all(batch)
-                session.commit()
-                session.close()
-            except Exception as e:
-                print(f"Error saving tick batch: {e}")
-
-        asyncio.create_task(asyncio.to_thread(do_save))
 
     async def monitor_index(self, index_name):
         print(f"Starting monitor for {index_name}")

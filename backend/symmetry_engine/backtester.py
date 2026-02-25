@@ -3,7 +3,7 @@ import datetime
 import asyncio
 from .data_provider import DataProvider
 from .strategy import StrategyEngine
-from .database import get_session, Trade, Signal, ReferenceLevel, Candle, RawTick
+from .database import get_session, Trade, Signal, ReferenceLevel, Candle
 from .execution import ExecutionEngine
 from .risk_manager import RiskManager
 from config import SYMMETRY_INDICES as INDICES, SYMMETRY_ENABLE_INDEX_SYNC as ENABLE_INDEX_SYNC
@@ -59,7 +59,6 @@ class Backtester:
             session.query(Signal).delete()
             session.query(ReferenceLevel).delete()
             session.query(Candle).delete()
-            session.query(RawTick).delete()
             session.commit()
         except Exception as e:
             print(f"Error cleaning backtest DB: {e}")
