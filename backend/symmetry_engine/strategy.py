@@ -75,85 +75,107 @@ class StrategyEngine:
         idx_history = self.candle_history.get(index_key, [])
 
         if len(opt_history) < 2 or len(idx_history) < 2:
-            return 0
+            return 1.0
 
         opt_prices = [c['close'] for c in opt_history]
         idx_prices = [c['close'] for c in idx_history]
 
-        opt_change = (opt_prices[-1] - opt_prices[-2]) / opt_prices[-2] if opt_prices[-2] != 0 else 0
-        idx_change = (idx_prices[-1] - idx_prices[-2]) / idx_prices[-2] if idx_prices[-2] != 0 else 0
+        # Magnitude of move
+        opt_change = abs(opt_prices[-1] - opt_prices[-2]) / opt_prices[-2] if opt_prices[-2] != 0 else 0
+        idx_change = abs(idx_prices[-1] - idx_prices[-2]) / idx_prices[-2] if idx_prices[-2] != 0 else 0
 
-        if idx_change == 0:
-            return 0
+        if idx_change < 0.00005: # Near zero index change
+            return 1.2 if opt_change > 0.001 else 1.0
 
         return opt_change / idx_change
 
     def identify_swing(self, candles):
         """
         Identify Significant Swings where a 'Wall' exists.
-        Enhanced: Hits a New High/Low and confirms with 2-candle pullback + ATR filter.
+        Expert Optimization:
+        1. Uses a 15-minute window for structural relevance.
+        2. Requires move magnitude > 1.2 * ATR to filter noise.
+        3. Requires 3-candle pullback for stronger confirmation of 'The Wall'.
         """
         if isinstance(candles, list):
-            if len(candles) < 10: return None
-
-            # Use pandas for consistency if window is large or complex logic is needed,
-            # but for 20 candles, manual is fine. Let's stick to consistent logic.
+            if len(candles) < 15: return None
             df = pd.DataFrame(candles)
             return self.identify_swing(df)
 
-        if len(candles) < 10:
+        if len(candles) < 15:
             return None
 
-        # Calculate ATR for threshold (optional but recommended)
-        atr = self.calculate_atr(candles.iloc[0].get('instrument_key', ''))
-        atr_threshold = atr * 0.5 if atr > 0 else 0
+        # Calculate ATR for the index
+        atr = self.calculate_atr(history=candles.to_dict('records'))
+        # High threshold for 'Expert' scalping: Move must be significant
+        atr_threshold = atr * 1.2 if atr > 0 else 5.0
 
-        # Simple swing detection: local high/low in the window
-        last_n = candles.tail(self.swing_window)
+        # Structural high/low in the 15-minute window
+        last_n = candles.tail(15)
         current_high = last_n['high'].max()
         current_low = last_n['low'].min()
 
-        # Check if the move into the high/low was significant relative to ATR
-        window_start_price = last_n.iloc[0]['close']
+        # Phase I Filter: Magnitude check
+        window_start_price = last_n.iloc[0]['open']
         if abs(current_high - window_start_price) < atr_threshold and abs(current_low - window_start_price) < atr_threshold:
             return None
 
-        # Confirmation logic:
-        # High formed: Extreme High at candle i-2, then candle i-1 and i have lower highs
+        # Phase II Filter: Confirmation logic (3-candle pullback)
         c = candles.iloc[-1]
         p = candles.iloc[-2]
         pp = candles.iloc[-3]
+        ppp = candles.iloc[-4]
 
         # Bullish Wall Identification (Resistance)
-        if pp['high'] == current_high:
-            if p['high'] < pp['high'] and c['high'] < p['high']:
-                # Pullback confirmed by 2 consecutive lower highs
+        if ppp['high'] == current_high:
+            # 3 lower highs following the peak
+            if p['high'] < ppp['high'] and c['high'] < p['high'] and pp['high'] < ppp['high']:
                 return {'type': 'High', 'price': current_high}
 
         # Bearish Wall Identification (Support)
-        if pp['low'] == current_low:
-            if p['low'] > pp['low'] and c['low'] > p['low']:
-                # Pullback confirmed by 2 consecutive higher lows
+        if ppp['low'] == current_low:
+            # 3 higher lows following the trough
+            if p['low'] > ppp['low'] and c['low'] > p['low'] and pp['low'] > ppp['low']:
                 return {'type': 'Low', 'price': current_low}
 
         return None
 
-    def check_decay_filter(self, current_index_price, current_ce_price, ref_level):
+    def check_decay_filter(self, current_index_price, current_option_price, ref_level):
         """
         Phase II: The Pullback & Decay Filter (Anti-Theta)
-        If Index returns to Ref_Price_Index but Current_Price_CE is higher than Ref_Price_CE
+        Symmetry Panic: If Index returns to Ref_Price but Option price is BETTER than at Ref_Price.
         """
-        if not ref_level or ref_level['type'] != 'High':
+        if not ref_level:
             return False
 
-        if current_index_price >= ref_level['index_price']:
-            if current_ce_price > ref_level['ce_price']:
-                return True # Bullish Divergence
+        if ref_level['type'] == 'High':
+            # Bullish: Index back near high, CE should be higher than it was at high
+            if current_index_price >= ref_level['index_price'] - 2:
+                if current_option_price > ref_level['ce_price']:
+                    return True
+        elif ref_level['type'] == 'Low':
+            # Bearish: Index back near low, PE should be higher than it was at low
+            if current_index_price <= ref_level['index_price'] + 2:
+                if current_option_price > ref_level['pe_price']:
+                    return True
         return False
+
+    def calculate_ema(self, instrument_key, period=20, interval=5):
+        """Calculates Exponential Moving Average for trend filtering."""
+        history = self.candle_history_5m.get(instrument_key, []) if interval == 5 else self.candle_history.get(instrument_key, [])
+        if len(history) < period:
+            return 0
+
+        prices = [c['close'] for c in history]
+        return pd.Series(prices).ewm(span=period, adjust=False).mean().iloc[-1]
 
     def generate_signals(self, instruments):
         """
-        Phase III: The Symmetry-Panic Trigger
+        Phase III: The Symmetry-Panic Trigger (Expert Optimized)
+        Optimizations:
+        1. 5m EMA 20 Trend Filter: Only Buy CE if Price > 5m EMA.
+        2. Relative Strength Filter: Options must be outperforming the index.
+        3. Panic Weighting: OI Panic is mandatory for high-probability scalps.
         """
         idx_key = instruments['index']
         ce_key = instruments['ce']
@@ -169,122 +191,131 @@ class StrategyEngine:
         ref_high = self.reference_levels['High']
         ref_low = self.reference_levels['Low']
 
+        # --- TREND FILTER ---
+        ema_5m = self.calculate_ema(idx_key, period=20, interval=5)
+        current_idx_price = idx_data['ltp']
+
         # --- Bullish Trigger (Call Buy) ---
         if ref_high:
             score = 0
             details = {}
 
-            # 1. Index: Crosses above Ref_Price_Index
-            if idx_data['ltp'] > ref_high['index_price']:
-                score += 1
-                details['index_break'] = True
+            # Trend Alignment: Only Buy CE if in 5m uptrend
+            if ema_5m > 0 and current_idx_price < ema_5m:
+                pass
+            else:
+                # 1. Index: Crosses above Ref_Price_Index
+                if current_idx_price > ref_high['index_price']:
+                    score += 1
+                    details['index_break'] = True
 
-            # 2. Symmetry (CE): Current_Price_CE crosses above Ref_Price_CE
-            if ce_data['ltp'] > ref_high['ce_price']:
-                score += 1
-                details['ce_break'] = True
+                # 2. Symmetry (CE): Current_Price_CE crosses above Ref_Price_CE
+                if ce_data['ltp'] > ref_high['ce_price']:
+                    score += 1
+                    details['ce_break'] = True
 
-            # 3. Symmetry (PE Breakdown): Current_Price_PE must break below local support/low
-            if pe_data['ltp'] < ref_high['pe_price']:
-                score += 1
-                details['pe_breakdown'] = True
+                # 3. Symmetry (PE Breakdown): Current_Price_PE must break below local support/low
+                if pe_data['ltp'] < ref_high['pe_price']:
+                    score += 1
+                    details['pe_breakdown'] = True
 
-            # 4. The Panic (OI): ATM Call OI decreasing, ATM Put OI increasing
-            details['ce_oi'] = float(ce_data.get('oi', 0))
-            details['ce_oi_delta'] = float(ce_data.get('oi_delta', 0))
-            details['pe_oi'] = float(pe_data.get('oi', 0))
-            details['pe_oi_delta'] = float(pe_data.get('oi_delta', 0))
+                # 4. Mandatory Metric: Relative Strength
+                rs = self.calculate_relative_strength(ce_key, idx_key)
+                details['ce_rs'] = rs
+                if rs > 1.2:
+                    score += 1
+                    details['strong_rs'] = True
 
-            if ce_data.get('oi_delta', 0) < 0 and pe_data.get('oi_delta', 0) > 0:
-                # Weighted Score: OI Panic is a high-conviction signal
-                score += 2
-                details['oi_panic'] = True
+                # 5. The Panic (OI) - CRITICAL WEIGHTING
+                ce_oi_delta = float(ce_data.get('oi_delta', 0))
+                pe_oi_delta = float(pe_data.get('oi_delta', 0))
 
-            # Calculate and log metrics
-            details['ce_velocity'] = self.calculate_velocity(ce_key)
-            details['ce_rs'] = self.calculate_relative_strength(ce_key, idx_key)
+                if ce_oi_delta < 0: # Sellers exiting CALLS (Short Covering)
+                    score += 2
+                    details['oi_panic'] = True
 
-            # Decay Filter Bonus (Anti-Theta)
-            if self.check_decay_filter(idx_data['ltp'], ce_data['ltp'], ref_high):
-                details['decay_filter'] = True
-                # Boost score if decay filter passes even if other conditions are marginal
-                score += 1
+                if pe_oi_delta > 0: # Buyers entering PUTS (Hedging)
+                    score += 1
+                    details['put_writing'] = True
 
-            # Volume Proxy check (Optional but adds conviction)
-            if idx_data.get('volume', 0) > 0:
-                details['volume_active'] = True
+                # 6. Decay Filter
+                if self.check_decay_filter(current_idx_price, ce_data['ltp'], ref_high):
+                    score += 1
+                    details['decay_filter'] = True
 
-            if score >= self.confluence_threshold:
-                # Log attempt
-                print(f"SIGNAL ATTEMPT: Bullish signal for {self.index_name} with score {score}")
-                # Check MTF Confirmation
-                if not self.check_mtf_confirmation('Bullish', idx_key):
-                    print(f"SIGNAL REJECTED: Bullish MTF Confirmation Failed for {self.index_name}")
-                    return None
+                # Confluence Logic: Fallback to score >= 4 if OI data is missing (Backtests)
+                has_oi_data = float(ce_data.get('oi', 0)) > 0 or abs(float(ce_data.get('oi_delta', 0))) > 0
+                is_valid = (score >= 5 and details.get('oi_panic')) if has_oi_data else (score >= 4)
 
-                # Check Guardrails
-                if self.check_guardrails('Bullish', idx_data, ce_data, pe_data, ref_high):
-                    print(f"SIGNAL REJECTED: Bullish Guardrails (Trap) Detected for {self.index_name}")
-                    return None
+                if is_valid:
+                    # Check Guardrails
+                    if self.check_guardrails('Bullish', idx_data, ce_data, pe_data, ref_high):
+                        return None
 
-                self.reset_trailing_sl()
-                details['ce_key'] = ce_key
-                details['pe_key'] = pe_key
-                return Signal(index_name=self.index_name, side='BUY_CE', index_price=idx_data['ltp'],
-                                option_price=ce_data['ltp'], confluence_score=score, details=details)
+                    self.reset_trailing_sl()
+                    details['ce_key'] = ce_key
+                    details['pe_key'] = pe_key
+                    return Signal(index_name=self.index_name, side='BUY_CE', index_price=idx_data['ltp'],
+                                    option_price=ce_data['ltp'], confluence_score=score, details=details)
 
         # --- Bearish Trigger (Put Buy) ---
         if ref_low:
             score = 0
             details = {}
 
-            if idx_data['ltp'] < ref_low['index_price']:
-                score += 1
-                details['index_break'] = True
-            else:
-                # Log why score might be low
+            # Trend Alignment: Only Buy PE if in 5m downtrend
+            if ema_5m > 0 and current_idx_price > ema_5m:
                 pass
+            else:
+                if current_idx_price < ref_low['index_price']:
+                    score += 1
+                    details['index_break'] = True
 
-            if pe_data['ltp'] > ref_low['pe_price']:
-                score += 1
-                details['pe_break'] = True
+                if pe_data['ltp'] > ref_low['pe_price']:
+                    score += 1
+                    details['pe_break'] = True
 
-            if ce_data['ltp'] < ref_low['ce_price']:
-                score += 1
-                details['ce_breakdown'] = True
+                if ce_data['ltp'] < ref_low['ce_price']:
+                    score += 1
+                    details['ce_breakdown'] = True
 
-            details['ce_oi'] = float(ce_data.get('oi', 0))
-            details['ce_oi_delta'] = float(ce_data.get('oi_delta', 0))
-            details['pe_oi'] = float(pe_data.get('oi', 0))
-            details['pe_oi_delta'] = float(pe_data.get('oi_delta', 0))
+                # Mandatory Metric: Relative Strength
+                rs = self.calculate_relative_strength(pe_key, idx_key)
+                details['pe_rs'] = rs
+                if rs > 1.2:
+                    score += 1
+                    details['strong_rs'] = True
 
-            if pe_data.get('oi_delta', 0) < 0 and ce_data.get('oi_delta', 0) > 0:
-                # Weighted Score
-                score += 2
-                details['oi_panic'] = True
+                # The Panic (OI)
+                pe_oi_delta = float(pe_data.get('oi_delta', 0))
+                ce_oi_delta = float(ce_data.get('oi_delta', 0))
 
-            # Metrics
-            details['pe_velocity'] = self.calculate_velocity(pe_key)
-            details['pe_rs'] = self.calculate_relative_strength(pe_key, idx_key)
+                if pe_oi_delta < 0: # Sellers exiting PUTS
+                    score += 2
+                    details['oi_panic'] = True
 
-            if idx_data.get('volume', 0) > 0:
-                details['volume_active'] = True
+                if ce_oi_delta > 0:
+                    score += 1
+                    details['call_writing'] = True
 
-            if score >= self.confluence_threshold:
-                # Check MTF Confirmation
-                if not self.check_mtf_confirmation('Bearish', idx_key):
-                    print(f"SIGNAL REJECTED: Bearish MTF Confirmation Failed for {self.index_name}")
-                    return None
+                # Decay Filter
+                if self.check_decay_filter(current_idx_price, pe_data['ltp'], ref_low):
+                    score += 1
+                    details['decay_filter'] = True
 
-                if self.check_guardrails('Bearish', idx_data, ce_data, pe_data, ref_low):
-                    print(f"SIGNAL REJECTED: Bearish Guardrails (Trap) Detected for {self.index_name}")
-                    return None
+                # Confluence Logic: Fallback to score >= 4 if OI data is missing (Backtests)
+                has_oi_data = float(pe_data.get('oi', 0)) > 0 or abs(float(pe_data.get('oi_delta', 0))) > 0
+                is_valid = (score >= 5 and details.get('oi_panic')) if has_oi_data else (score >= 4)
 
-                self.reset_trailing_sl()
-                details['ce_key'] = ce_key
-                details['pe_key'] = pe_key
-                return Signal(index_name=self.index_name, side='BUY_PE', index_price=idx_data['ltp'],
-                                option_price=pe_data['ltp'], confluence_score=score, details=details)
+                if is_valid:
+                    if self.check_guardrails('Bearish', idx_data, ce_data, pe_data, ref_low):
+                        return None
+
+                    self.reset_trailing_sl()
+                    details['ce_key'] = ce_key
+                    details['pe_key'] = pe_key
+                    return Signal(index_name=self.index_name, side='BUY_PE', index_price=idx_data['ltp'],
+                                    option_price=pe_data['ltp'], confluence_score=score, details=details)
 
         return None
 

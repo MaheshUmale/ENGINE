@@ -1,6 +1,7 @@
 from .database import get_session, Trade
 from .config import INDICES
 import datetime
+import asyncio
 
 class ExecutionEngine:
     def __init__(self, session_factory=None, initial_balance=1000000, slippage=0.001, commission_rate=0.0005, fixed_charge=20):

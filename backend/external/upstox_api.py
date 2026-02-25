@@ -40,12 +40,6 @@ class UpstoxAPIClient:
                                       "week" if fetch_interval in ["1W", "W"] else \
                                       "month" if fetch_interval in ["1M", "M"] else "1minute"
 
-                    # Try intraday first if it's a small interval and no specific range requested
-                    if not from_date and upstox_interval in ["1minute", "30minute"]:
-                         res = history_api.get_intra_day_candle_data(instrument_key, upstox_interval, "2.0")
-                         if res and res.status == "success" and res.data and res.data.candles:
-                             return res
-
                     # Use provided range or fallback to historical defaults
                     f_date = from_date
                     if not f_date:

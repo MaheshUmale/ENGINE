@@ -65,6 +65,9 @@ class OptionsManager:
         self.monitored_symbols: Dict[str, set] = {} # {underlying: set(symbols)}
         self._tracking_task = None
 
+        # New feature: SOD OI Cache for calculating intraday change
+        self.sod_oi_cache: Dict[str, Dict[str, int]] = {}
+
     def set_socketio(self, sio, loop=None):
         self.sio = sio
         self.loop = loop
@@ -214,8 +217,8 @@ class OptionsManager:
                             spot_price = spot_map[potential_ts[-1]]
 
                     # Process chain data with enhanced metrics
-                    rows = self._process_chain_data(
-                        oi_data, underlying, snapshot_time, default_expiry, spot_price
+                    rows = await self._process_oi_data(
+                        oi_data, underlying, default_expiry, {}, spot_price, "backfill"
                     )
 
                     if rows:
@@ -228,102 +231,6 @@ class OptionsManager:
             except Exception as e:
                 logger.error(f"Error backfilling {underlying}: {e}")
 
-    def _process_chain_data(
-        self,
-        oi_data: Dict[str, Any],
-        underlying: str,
-        timestamp: datetime,
-        expiry: str,
-        spot_price: float
-    ) -> List[Dict[str, Any]]:
-        """Process chain data with Greeks calculation."""
-        rows = []
-
-        # Robust date parsing
-        expiry_date = None
-        if isinstance(expiry, str):
-            for fmt in ("%Y-%m-%d", "%d-%b-%Y", "%d-%m-%Y"):
-                try:
-                    expiry_date = datetime.strptime(expiry, fmt).date()
-                    break
-                except:
-                    continue
-
-        if not expiry_date:
-             return []
-
-        today = datetime.now(pytz.timezone('Asia/Kolkata')).date()
-        days_to_expiry = max((expiry_date - today).days, 0)
-        time_to_expiry = days_to_expiry / 365.0
-
-        for strike_str, strike_data in oi_data.items():
-            strike = safe_float(strike_str)
-            call_sym = self.symbol_map_cache.get(underlying, {}).get(f"{strike}_call")
-            put_sym = self.symbol_map_cache.get(underlying, {}).get(f"{strike}_put")
-
-            # Call option data
-            call_ltp = safe_float(strike_data.get('callLtp') or strike_data.get('callLastPrice'))
-            call_oi = safe_int(strike_data.get('callOi'))
-            call_oi_change = safe_int(strike_data.get('callOiChange'))
-
-            # Calculate Greeks for call
-            call_greeks = greeks_calculator.calculate_all_greeks(
-                spot_price, strike, time_to_expiry, 0.20, 'call', call_ltp
-            )
-
-            rows.append({
-                'timestamp': timestamp,
-                'underlying': underlying,
-                'symbol': call_sym,
-                'expiry': expiry_date,
-                'strike': strike,
-                'option_type': 'call',
-                'oi': call_oi,
-                'oi_change': call_oi_change,
-                'volume': safe_int(strike_data.get('callVol') or strike_data.get('callVolume')),
-                'ltp': call_ltp,
-                'iv': call_greeks['implied_volatility'],
-                'delta': call_greeks['delta'],
-                'gamma': call_greeks['gamma'],
-                'theta': call_greeks['theta'],
-                'vega': call_greeks['vega'],
-                'intrinsic_value': call_greeks['intrinsic_value'],
-                'time_value': call_greeks['time_value'],
-                'source': 'backfill'
-            })
-
-            # Put option data
-            put_ltp = safe_float(strike_data.get('putLtp') or strike_data.get('putLastPrice'))
-            put_oi = safe_int(strike_data.get('putOi'))
-            put_oi_change = safe_int(strike_data.get('putOiChange'))
-
-            # Calculate Greeks for put
-            put_greeks = greeks_calculator.calculate_all_greeks(
-                spot_price, strike, time_to_expiry, 0.20, 'put', put_ltp
-            )
-
-            rows.append({
-                'timestamp': timestamp,
-                'underlying': underlying,
-                'symbol': put_sym,
-                'expiry': expiry_date,
-                'strike': strike,
-                'option_type': 'put',
-                'oi': put_oi,
-                'oi_change': put_oi_change,
-                'volume': safe_int(strike_data.get('putVol') or strike_data.get('putVolume')),
-                'ltp': put_ltp,
-                'iv': put_greeks['implied_volatility'],
-                'delta': put_greeks['delta'],
-                'gamma': put_greeks['gamma'],
-                'theta': put_greeks['theta'],
-                'vega': put_greeks['vega'],
-                'intrinsic_value': put_greeks['intrinsic_value'],
-                'time_value': put_greeks['time_value'],
-                'source': 'backfill'
-            })
-
-        return rows
 
     async def stop(self):
         self.running = False
@@ -538,7 +445,7 @@ class OptionsManager:
             if not oi_data:
                 return await self._take_snapshot_tv(underlying, spot_price=spot_price)
 
-            rows = self._process_oi_data(
+            rows = await self._process_oi_data(
                 oi_data, underlying, default_expiry, wss_data, spot_price, oi_source
             )
 
@@ -625,6 +532,37 @@ class OptionsManager:
             logger.error(f"CRITICAL: Could not discover any Spot Price for {underlying}")
         return 0
 
+    async def _get_sod_oi(self, underlying: str, expiry_str: str) -> Dict[str, int]:
+        """Fetch or query the first snapshot's OI for the current day."""
+        ist = pytz.timezone('Asia/Kolkata')
+        today_str = datetime.now(ist).strftime('%Y-%m-%d')
+        cache_key = f"{underlying}_{expiry_str}_{today_str}"
+
+        if cache_key in self.sod_oi_cache:
+            return self.sod_oi_cache[cache_key]
+
+        # Query DuckDB for the earliest snapshot of today
+        try:
+            res = await asyncio.to_thread(db.query, """
+                SELECT strike, option_type, oi FROM options_snapshots
+                WHERE underlying = ? AND expiry = ?
+                AND CAST(timestamp AS DATE) = ?
+                ORDER BY timestamp ASC
+            """, (underlying, expiry_str, today_str))
+
+            if res:
+                sod_map = {}
+                for r in res:
+                    k = f"{r['strike']}_{r['option_type']}"
+                    if k not in sod_map: # Earliest only
+                        sod_map[k] = safe_int(r['oi'])
+                self.sod_oi_cache[cache_key] = sod_map
+                return sod_map
+        except Exception as e:
+            logger.error(f"Error fetching SOD OI: {e}")
+
+        return {}
+
     async def _fetch_oi_data(self, underlying: str, reference_date: str = None) -> tuple:
         """Fetch OI data using Registry with automatic failover."""
         ist = pytz.timezone('Asia/Kolkata')
@@ -650,7 +588,7 @@ class OptionsManager:
 
         return None, None, None
 
-    def _process_oi_data(
+    async def _process_oi_data(
         self,
         oi_data: Dict[str, Any],
         underlying: str,
@@ -662,6 +600,9 @@ class OptionsManager:
         """Process OI data with enhanced metrics."""
         rows = []
         timestamp = datetime.now(pytz.utc)
+
+        # Get SOD OI for intraday change calculation if provider doesn't give it
+        sod_oi = await self._get_sod_oi(underlying, default_expiry)
 
         # Robust date parsing
         expiry_date = None
@@ -694,6 +635,13 @@ class OptionsManager:
                 spot_price, strike, time_to_expiry, 0.20, 'call', call_ltp
             )
 
+            call_oi = safe_int(strike_data.get('callOi'))
+            call_oi_chg = safe_int(strike_data.get('callOiChange'))
+
+            # Fallback for Upstox: calculate change since SOD if 0
+            if call_oi_chg == 0 and sod_oi.get(f"{strike}_call"):
+                call_oi_chg = call_oi - sod_oi[f"{strike}_call"]
+
             rows.append({
                 'timestamp': timestamp,
                 'underlying': underlying,
@@ -701,8 +649,8 @@ class OptionsManager:
                 'expiry': expiry_date,
                 'strike': strike,
                 'option_type': 'call',
-                'oi': safe_int(strike_data.get('callOi')),
-                'oi_change': safe_int(strike_data.get('callOiChange')),
+                'oi': call_oi,
+                'oi_change': call_oi_chg,
                 'volume': safe_int(c_wss.get('volume')) or safe_int(strike_data.get('callVol')),
                 'ltp': call_ltp,
                 'iv': call_greeks['implied_volatility'],
@@ -721,6 +669,12 @@ class OptionsManager:
                 spot_price, strike, time_to_expiry, 0.20, 'put', put_ltp
             )
 
+            put_oi = safe_int(strike_data.get('putOi'))
+            put_oi_chg = safe_int(strike_data.get('putOiChange'))
+
+            if put_oi_chg == 0 and sod_oi.get(f"{strike}_put"):
+                put_oi_chg = put_oi - sod_oi[f"{strike}_put"]
+
             rows.append({
                 'timestamp': timestamp,
                 'underlying': underlying,
@@ -728,8 +682,8 @@ class OptionsManager:
                 'expiry': expiry_date,
                 'strike': strike,
                 'option_type': 'put',
-                'oi': safe_int(strike_data.get('putOi')),
-                'oi_change': safe_int(strike_data.get('putOiChange')),
+                'oi': put_oi,
+                'oi_change': put_oi_chg,
                 'volume': safe_int(p_wss.get('volume')) or safe_int(strike_data.get('putVol')),
                 'ltp': put_ltp,
                 'iv': put_greeks['implied_volatility'],

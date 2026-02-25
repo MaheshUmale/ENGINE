@@ -178,6 +178,9 @@ class Backtester:
             else:
                 combined['volume_fut'] = 0
 
+            # Convert UTC to IST (+5:30) for alignment with market hours
+            combined['timestamp'] = combined['timestamp'] + datetime.timedelta(hours=5, minutes=30)
+
             # Use forward fill for prices and OI to handle missing candles, then fill remaining NaNs with 0
             combined = combined.dropna(subset=['close_idx'])
             combined = combined.sort_values('timestamp').ffill().fillna(0)
