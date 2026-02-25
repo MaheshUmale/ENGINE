@@ -17,6 +17,7 @@ This document centralizes all requirements for the ProDesk Trading Terminal, syn
 - [x] **Real-time Bridge**: Internal tick callback system allowing strategy bots to consume live WebSocket data without redundant connections.
 - [x] **Historical Aggregation**: Client-side logic to handle non-native timeframes (e.g., 3m, 7m).
 - [x] **High-Performance Storage**: DuckDB for tick/options history and SQLite for trade/signal persistence.
+- [x] **DuckDB Partitioning**: Daily partitioning of ticks to maintain performance.
 - [x] **Timezone Localization**: Full Indian Standard Time (IST) support across charts and database storage.
 
 ## 3. Options Analysis System [COMPLETED]
@@ -56,7 +57,7 @@ This document centralizes all requirements for the ProDesk Trading Terminal, syn
 ## 7. Remaining Items & Upgrades [TODO]
 - [x] **Paper Trading Persistence**: Ensure paper trades survive server restarts (Implemented via `recover_state` in bot engine).
 - [ ] **ML-Based IV Prediction**: Integrate a light LSTM model for short-term IV volatility forecasting.
-- [ ] **Portfolio Greeks**: Combined Greeks tracking for multi-symbol portfolios.
+- [x] **Portfolio Greeks**: Combined Greeks tracking for multi-symbol portfolios (Implemented in portfolio.py).
 - [ ] **Mobile App PWA**: Transform the dashboard into a Progressive Web App for better mobile experience.
 - [x] **Advanced Backtest Engine**: GUI-based backtesting tool to test symmetry parameters without code.
 - [ ] **Automated Order Execution**: Direct integration with broker APIs (Zerodha/Dhan/Upstox) for live trading (disabled by default).

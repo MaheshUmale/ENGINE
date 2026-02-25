@@ -6,15 +6,6 @@ from config import SYMMETRY_DB_PATH as DB_PATH
 
 Base = declarative_base()
 
-class RawTick(Base):
-    __tablename__ = 'raw_ticks'
-    id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None))
-    instrument_key = Column(String)
-    ltp = Column(Float)
-    volume = Column(Float)
-    oi = Column(Float)
-
 class Candle(Base):
     __tablename__ = 'candles'
     id = Column(Integer, primary_key=True)
