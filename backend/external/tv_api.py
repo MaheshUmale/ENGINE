@@ -132,16 +132,25 @@ class TradingViewAPI:
 
                 if data and 'ohlc' in data:
                     candles = []
+                    import pytz
+                    ist = pytz.timezone('Asia/Kolkata')
                     for row in data['ohlc']:
                         ts = row.get('timestamp') or row.get('datetime')
                         if not isinstance(ts, (int, float)):
                             try:
-                                ts = int(datetime.fromisoformat(ts.replace('Z', '+00:00')).timestamp())
-                            except:
-                                pass
+                                # TradingView Scraper often returns timestamps in local exchange time
+                                # if they are string-formatted without offset.
+                                # For NSE, it's usually IST.
+                                dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                                if 'Z' not in ts and '+' not in ts:
+                                    # Assume it was IST if no offset provided
+                                    dt = ist.localize(dt.replace(tzinfo=None))
+                                ts = int(dt.timestamp())
+                            except Exception as e:
+                                logger.debug(f"TV Streamer timestamp parse error: {e}")
 
                         candles.append([
-                            ts,
+                            int(ts),
                             float(row['open']), float(row['high']), float(row['low']), float(row['close']),
                             float(row['volume'])
                         ])
@@ -154,8 +163,11 @@ class TradingViewAPI:
             try:
                 from db.local_db import db
                 orig_key = symbol_or_hrn
-                # Try with exchange prefix if not present
-                possible_keys = [orig_key, f"{tv_exchange}:{tv_symbol}", tv_symbol]
+                # Try with multiple variations for matching
+                possible_keys = [orig_key, f"{tv_exchange}:{tv_symbol}", tv_symbol, f"{tv_exchange}|{tv_symbol}"]
+                # Also try Upstox mapped key
+                up_key = symbol_mapper.to_upstox_key(orig_key)
+                if up_key not in possible_keys: possible_keys.append(up_key)
 
                 res = None
                 for k in possible_keys:

@@ -119,6 +119,19 @@ class OptionsDashboardManager {
 
         const mpEl = document.getElementById(`${prefix}_maxPain`);
         if (mpEl) mpEl.textContent = data.max_pain.toLocaleString();
+
+        // Greeks and IV
+        const ivrEl = document.getElementById(`${prefix}_ivRank`);
+        if (ivrEl) ivrEl.textContent = data.iv_rank ? data.iv_rank.toFixed(1) : '-';
+
+        const ivpEl = document.getElementById(`${prefix}_ivPercentile`);
+        if (ivpEl) ivpEl.textContent = data.iv_percentile ? data.iv_percentile.toFixed(1) : '-';
+
+        const deltaEl = document.getElementById(`${prefix}_netDelta`);
+        if (deltaEl) deltaEl.textContent = data.net_delta ? (data.net_delta / 1000).toFixed(1) + 'k' : '-';
+
+        const thetaEl = document.getElementById(`${prefix}_netTheta`);
+        if (thetaEl) thetaEl.textContent = data.net_theta ? (data.net_theta / 1000).toFixed(1) + 'k' : '-';
     }
 
     renderCEvsPEChangeChart(prefix, data) {

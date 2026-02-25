@@ -110,6 +110,26 @@
                                 <canvas id="${idPrefix}_pcrTrendChart"></canvas>
                             </div>
                         </div>
+
+                        <!-- Greeks & IV Section -->
+                        <div class="grid grid-cols-4 gap-2 mt-1 pt-1 border-t border-white/5">
+                            <div class="flex flex-col">
+                                <span class="mini-text text-gray-500 uppercase font-bold">IV Rank</span>
+                                <span id="${idPrefix}_ivRank" class="mini-text text-blue-400 font-black">-</span>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="mini-text text-gray-500 uppercase font-bold">IV %</span>
+                                <span id="${idPrefix}_ivPercentile" class="mini-text text-blue-400 font-black">-</span>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="mini-text text-gray-500 uppercase font-bold">Net Δ</span>
+                                <span id="${idPrefix}_netDelta" class="mini-text text-white font-black">-</span>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="mini-text text-gray-500 uppercase font-bold">Net θ</span>
+                                <span id="${idPrefix}_netTheta" class="mini-text text-white font-black">-</span>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Charts Grid -->

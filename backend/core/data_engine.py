@@ -258,8 +258,14 @@ def on_message(message: Union[Dict, str]):
         now = time.time()
         if now - last_emit_times.get('GLOBAL_TICK', 0) > 0.05:
             for inst_key, feed in sym_feeds.items():
-                # Emit to specific technical symbol room
+                # Emit to the provider-specific room
                 emit_event('raw_tick', {inst_key: feed}, room=inst_key.upper())
+
+                # ALSO emit to the internal canonical symbol room (e.g. NSE:NIFTY)
+                # so that UI components subscribed to common names receive the data
+                internal_key = symbol_mapper.from_upstox_key(inst_key)
+                if internal_key != inst_key:
+                    emit_event('raw_tick', {internal_key: feed}, room=internal_key.upper())
             last_emit_times['GLOBAL_TICK'] = now
 
         with buffer_lock:
