@@ -843,6 +843,12 @@ class OptionsManager:
 
                 self.symbol_map_cache[underlying][f"{strike}_{opt_type}"] = symbol
 
+                # Ensure it's registered in global symbol_mapper for historical fetching failovers
+                from core.symbol_mapper import symbol_mapper
+                symbol_mapper.register_mapping(symbol, symbol) # Map to itself if already technical
+                if ':' in symbol:
+                    symbol_mapper.register_mapping(symbol.split(':')[-1], symbol)
+
                 rows.append({
                     'timestamp': timestamp,
                     'underlying': underlying,
@@ -896,6 +902,12 @@ class OptionsManager:
 
                 all_symbols.append(symbol)
                 self.symbol_map_cache[underlying][f"{strike}_{opt_type}"] = symbol
+
+                # Register in global symbol_mapper for historical fetching failovers
+                from core.symbol_mapper import symbol_mapper
+                symbol_mapper.register_mapping(symbol, symbol)
+                if ':' in symbol:
+                    symbol_mapper.register_mapping(symbol.split(':')[-1], symbol)
 
         # Fallback to local DB if symbols not found via provider
         if not self.symbol_map_cache[underlying]:

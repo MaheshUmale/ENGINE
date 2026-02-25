@@ -168,8 +168,10 @@ class SymbolMapper:
 
     def to_upstox_key(self, internal_key: str) -> str:
         """Translates internal key (NSE:NIFTY) to Upstox key (NSE_INDEX|Nifty 50)."""
+        if not internal_key: return ""
+
         # If it already looks like an Upstox key, return it as is (preserving case)
-        if '|' in internal_key:
+        if '|' in internal_key and not internal_key.startswith('NSE:'):
             # Check if it's a known index but incorrectly cased
             upper_key = internal_key.upper()
             for k, v in UPSTOX_INDEX_MAP.items():
@@ -177,25 +179,59 @@ class SymbolMapper:
                     return v # Return correctly cased index key
             return internal_key
 
-        key = internal_key.upper()
+        key = internal_key.upper().replace('|', ':')
 
-        # Check dynamic mapping first
-        if key in self._internal_to_upstox:
-            return self._internal_to_upstox[key]
+        # Handle prefixes: NIFTY26... vs NSE:NIFTY26...
+        no_prefix_key = key.split(':')[-1]
+        prefixed_key = f"NSE:{no_prefix_key}"
 
-        if key in UPSTOX_INDEX_MAP:
-            return UPSTOX_INDEX_MAP[key]
+        # 1. Check dynamic mapping (both variations)
+        for k in [prefixed_key, no_prefix_key, key]:
+            if k in self._internal_to_upstox:
+                return self._internal_to_upstox[k]
+
+        # 2. Check Static Index Map
+        for k in [prefixed_key, no_prefix_key, key]:
+            if k in UPSTOX_INDEX_MAP:
+                return UPSTOX_INDEX_MAP[k]
 
         # Default mapping for equity/options if they follow common patterns
-        # Upstox Equities: NSE_EQ|INE... or NSE_EQ|SYMBOL
-        # Upstox F&O: NSE_FO|KEY
-
         # If it looks like an F&O symbol (e.g. NIFTY26...) and has no prefix, add NSE_FO|
         import re
-        if not '|' in key and re.match(r'^(NIFTY|BANKNIFTY|FINNIFTY|RELIANCE|HDFCBANK)\d{2}', key):
-            return f"NSE_FO|{key}"
+        if re.match(r'^(NIFTY|BANKNIFTY|FINNIFTY|RELIANCE|HDFCBANK)\d{2}', no_prefix_key):
+            return f"NSE_FO|{no_prefix_key}"
 
         return key.replace(':', '|')
+
+    def to_tv_symbol(self, internal_key: str) -> str:
+        """Translates internal key to TradingView symbol (e.g. NSE:NIFTY)."""
+        if not internal_key: return ""
+
+        # Mapping for Indices
+        index_map = {
+            "NIFTY": "NSE:NIFTY",
+            "BANKNIFTY": "NSE:BANKNIFTY",
+            "INDIA VIX": "NSE:INDIAVIX",
+            "INDIAVIX": "NSE:INDIAVIX",
+            "SENSEX": "BSE:SENSEX"
+        }
+
+        key = internal_key.upper().replace('|', ':')
+        no_prefix = key.split(':')[-1]
+
+        if no_prefix in index_map:
+            return index_map[no_prefix]
+
+        if "NIFTY BANK" in key or "BANKNIFTY" in key:
+            return "NSE:BANKNIFTY"
+        if "NIFTY" in key:
+            return "NSE:NIFTY"
+
+        # If it's already prefixed, return as is
+        if ':' in key:
+            return key
+
+        return f"NSE:{key}"
 
     def from_upstox_key(self, upstox_key: str) -> str:
         """Translates Upstox key to internal canonical symbol."""

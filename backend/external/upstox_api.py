@@ -183,6 +183,8 @@ class UpstoxAPIClient:
                         # Construct internal symbol: NSE:NIFTY260224C25700
                         internal_symbol = f"NSE:{base_symbol}{yy}{mm}{dd}C{strike_str}"
                         symbol_mapper.register_mapping(internal_symbol, u_key)
+                        # Also register without prefix for robustness
+                        symbol_mapper.register_mapping(f"{base_symbol}{yy}{mm}{dd}C{strike_str}", u_key)
                         standard_data["symbols"].append({"f": row})
 
                     if item.put_options:
@@ -199,6 +201,8 @@ class UpstoxAPIClient:
 
                         internal_symbol = f"NSE:{base_symbol}{yy}{mm}{dd}P{strike_str}"
                         symbol_mapper.register_mapping(internal_symbol, u_key)
+                        # Also register without prefix
+                        symbol_mapper.register_mapping(f"{base_symbol}{yy}{mm}{dd}P{strike_str}", u_key)
                         standard_data["symbols"].append({"f": row})
                 return standard_data
             return {}

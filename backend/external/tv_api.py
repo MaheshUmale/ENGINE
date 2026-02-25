@@ -37,15 +37,6 @@ class TradingViewAPI:
             logger.warning("tvDatafeed not installed, falling back to Streamer only")
 
         self._init_streamer()
-        self.symbol_map = {
-            'NIFTY': {'symbol': 'NIFTY', 'exchange': 'NSE'},
-            'BANKNIFTY': {'symbol': 'BANKNIFTY', 'exchange': 'NSE'},
-            'INDIA VIX': {'symbol': 'INDIAVIX', 'exchange': 'NSE'},
-            'NSE_INDEX|NIFTY 50': {'symbol': 'NIFTY', 'exchange': 'NSE'},
-            'NSE_INDEX|NIFTY BANK': {'symbol': 'BANKNIFTY', 'exchange': 'NSE'},
-            'NSE:NIFTY': {'symbol': 'NIFTY', 'exchange': 'NSE'},
-            'NSE:BANKNIFTY': {'symbol': 'BANKNIFTY', 'exchange': 'NSE'}
-        }
 
     def _init_streamer(self):
         try:
@@ -60,38 +51,16 @@ class TradingViewAPI:
             logger.info(f"Fetching historical candles for {symbol_or_hrn} (bars={n_bars})")
             if not symbol_or_hrn: return None
 
-            tv_symbol = symbol_or_hrn
-            tv_exchange = 'NSE'
+            # Centralized mapping to TV symbol (e.g. NSE:NIFTY)
+            tv_full_symbol = symbol_mapper.to_tv_symbol(symbol_or_hrn)
 
-            if ':' in symbol_or_hrn:
-                parts = symbol_or_hrn.split(':')
-                tv_exchange = parts[0].upper()
-                tv_symbol = parts[1].upper()
-
-            # Normalize for map lookup
-            lookup_key = symbol_or_hrn.upper().replace(':', '|')
-
-            if lookup_key in self.symbol_map:
-                meta = self.symbol_map[lookup_key]
-                tv_symbol = meta['symbol']
-                tv_exchange = meta['exchange']
-            elif 'NIFTY BANK' in lookup_key or 'BANKNIFTY' in lookup_key:
-                tv_symbol = 'BANKNIFTY'
-                tv_exchange = 'NSE'
-            elif 'NIFTY 50' in lookup_key or 'NIFTY' in lookup_key:
-                tv_symbol = 'NIFTY'
-                tv_exchange = 'NSE'
-            elif 'INDIA VIX' in lookup_key or 'INDIAVIX' in lookup_key:
-                tv_symbol = 'INDIAVIX'
-                tv_exchange = 'NSE'
+            if ':' in tv_full_symbol:
+                parts = tv_full_symbol.split(':')
+                tv_exchange = parts[0]
+                tv_symbol = parts[1]
             else:
-                # Use symbol_mapper for generic index/symbol extraction
-                clean = symbol_mapper.get_symbol(symbol_or_hrn)
-                if clean in ['NIFTY', 'BANKNIFTY', 'INDIA VIX']:
-                    tv_symbol = clean.replace(' ', '')
-                    tv_exchange = 'NSE'
-                elif clean:
-                    tv_symbol = clean
+                tv_exchange = 'NSE'
+                tv_symbol = tv_full_symbol
 
             logger.info(f"Mapped {symbol_or_hrn} -> {tv_exchange}:{tv_symbol}")
 
@@ -110,6 +79,7 @@ class TradingViewAPI:
                     elif interval_min == 'D' or interval_min == '1d': tv_interval = Interval.in_daily
                     elif interval_min == 'W' or interval_min == '1w': tv_interval = Interval.in_weekly
 
+                    # tvDatafeed can be sensitive to case and exchange
                     df = self.tv.get_hist(symbol=tv_symbol, exchange=tv_exchange, interval=tv_interval, n_bars=n_bars)
                     if df is not None and not df.empty:
                         candles = []
