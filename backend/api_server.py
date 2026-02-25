@@ -520,6 +520,8 @@ async def get_intraday(
 
 @fastapi_app.get("/api/options/chain/{underlying}/with-greeks")
 async def get_chain_with_greeks(underlying: str, spot_price: Optional[float] = None):
+    # Normalize underlying (e.g. nifty -> NSE:NIFTY)
+    underlying = symbol_mapper.to_tv_symbol(underlying)
     chain_data = options_manager.get_chain_with_greeks(underlying)
     spot = spot_price or await options_manager.get_spot_price(underlying)
 
@@ -532,6 +534,7 @@ async def get_chain_with_greeks(underlying: str, spot_price: Optional[float] = N
 
 @fastapi_app.get("/api/options/pcr-trend/{underlying}")
 async def get_pcr_trend(underlying: str):
+    underlying = symbol_mapper.to_tv_symbol(underlying)
     cache_key = f"pcr_trend_{underlying}"
     cached = pcr_cache.get(cache_key)
     if cached: return cached
@@ -552,8 +555,9 @@ async def get_pcr_trend(underlying: str):
 
 @fastapi_app.get("/api/options/oi-analysis/{underlying}")
 async def get_oi_analysis(underlying: str):
+    underlying = symbol_mapper.to_tv_symbol(underlying)
     latest = await asyncio.to_thread(db.query, "SELECT MAX(timestamp) as ts FROM options_snapshots WHERE underlying = ?", (underlying,))
-    if not latest or not latest[0]['ts']: return {"data": []}
+    if not latest or not latest[0]['ts']: return {"data": [], "totals": None, "timestamp": "NaT"}
 
     ts = latest[0]['ts']
     data = await asyncio.to_thread(db.query, """
@@ -586,6 +590,7 @@ async def get_oi_analysis(underlying: str):
 @fastapi_app.get("/api/options/oi-trend-detailed/{underlying}")
 async def get_oi_trend_detailed(underlying: str):
     """Provides CE vs PE OI Change and Spot Price over time for the current session."""
+    underlying = symbol_mapper.to_tv_symbol(underlying)
     history = await asyncio.to_thread(db.query, """
         SELECT
             s.timestamp,
@@ -603,19 +608,29 @@ async def get_oi_trend_detailed(underlying: str):
     return {"history": history}
 
 @fastapi_app.get("/api/options/genie-insights/{underlying}")
-async def get_genie_insights(underlying: str): return await options_manager.get_genie_insights(underlying)
+async def get_genie_insights(underlying: str):
+    underlying = symbol_mapper.to_tv_symbol(underlying)
+    return await options_manager.get_genie_insights(underlying)
 
 @fastapi_app.get("/api/options/oi-buildup/{underlying}")
-async def get_oi_buildup(underlying: str): return options_manager.get_oi_buildup_analysis(underlying)
+async def get_oi_buildup(underlying: str):
+    underlying = symbol_mapper.to_tv_symbol(underlying)
+    return options_manager.get_oi_buildup_analysis(underlying)
 
 @fastapi_app.get("/api/options/iv-analysis/{underlying}")
-async def get_iv_analysis(underlying: str): return options_manager.get_iv_analysis(underlying)
+async def get_iv_analysis(underlying: str):
+    underlying = symbol_mapper.to_tv_symbol(underlying)
+    return options_manager.get_iv_analysis(underlying)
 
 @fastapi_app.get("/api/options/support-resistance/{underlying}")
-async def get_sr_levels(underlying: str): return options_manager.get_support_resistance(underlying)
+async def get_sr_levels(underlying: str):
+    underlying = symbol_mapper.to_tv_symbol(underlying)
+    return options_manager.get_support_resistance(underlying)
 
 @fastapi_app.get("/api/options/high-activity/{underlying}")
-async def get_high_activity(underlying: str): return options_manager.get_high_activity_strikes(underlying)
+async def get_high_activity(underlying: str):
+    underlying = symbol_mapper.to_tv_symbol(underlying)
+    return options_manager.get_high_activity_strikes(underlying)
 
 @fastapi_app.post("/api/options/backfill")
 async def trigger_backfill():
@@ -639,6 +654,7 @@ async def build_strategy(req: Request):
 
 @fastapi_app.get("/api/alerts/list/{underlying}")
 async def get_alerts_for_underlying(underlying: str):
+    underlying = symbol_mapper.to_tv_symbol(underlying)
     return alert_system.get_alerts(underlying)
 
 @fastapi_app.post("/api/alerts/create")
@@ -667,6 +683,7 @@ async def delete_alert(alert_id: str):
 
 @fastapi_app.post("/api/scalper/start")
 async def start_scalper(underlying: str = "NSE:NIFTY"):
+    underlying = symbol_mapper.to_tv_symbol(underlying)
     scalper.underlying = underlying
     await scalper.start()
     return {"status": "success"}
