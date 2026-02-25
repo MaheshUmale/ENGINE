@@ -12,7 +12,7 @@ from config import (
     SYMMETRY_SWING_WINDOW as SWING_WINDOW,
     SYMMETRY_ENABLE_INDEX_SYNC as ENABLE_INDEX_SYNC
 )
-from .database import init_db, get_session, RawTick, Candle
+from .database import init_db, get_session, Candle
 
 class TradingBot:
     def __init__(self, loop=None):
@@ -392,8 +392,8 @@ class TradingBot:
                         })
 
                     # Identify Swings
-                    swing_data = subset.rename(columns={'high_idx': 'high', 'low_idx': 'low', 'close_idx': 'close'})
-                    swing = engine.identify_swing(swing_data[['high', 'low', 'close']])
+                    swing_data = subset.rename(columns={'open_idx': 'open', 'high_idx': 'high', 'low_idx': 'low', 'close_idx': 'close'})
+                    swing = engine.identify_swing(swing_data[['open', 'high', 'low', 'close']])
                     if swing:
                         engine.save_reference_level(
                             swing['type'],

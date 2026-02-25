@@ -1,6 +1,6 @@
 import pandas as pd
 import datetime
-from .database import get_session, ReferenceLevel, Signal, RawTick
+from .database import get_session, ReferenceLevel, Signal
 from config import (
     SYMMETRY_SWING_WINDOW as SWING_WINDOW,
     SYMMETRY_CONFLUENCE_THRESHOLD as CONFLUENCE_THRESHOLD,

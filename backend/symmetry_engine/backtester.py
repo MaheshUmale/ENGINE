@@ -266,8 +266,8 @@ class Backtester:
                         }, interval=5)
 
                 # Identify Swings
-                swing_data = subset.rename(columns={'high_idx': 'high', 'low_idx': 'low', 'close_idx': 'close'})
-                swing = self.strategy.identify_swing(swing_data[['high', 'low', 'close']])
+                swing_data = subset.rename(columns={'open_idx': 'open', 'high_idx': 'high', 'low_idx': 'low', 'close_idx': 'close'})
+                swing = self.strategy.identify_swing(swing_data[['open', 'high', 'low', 'close']])
                 if swing:
                     ce_key = details['ce']
                     pe_key = details['pe']
