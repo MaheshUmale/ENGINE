@@ -73,9 +73,47 @@ class TrendlyneOptionsProvider(IOptionsDataProvider):
     async def get_oi_data(self, underlying: str, expiry: str, time_str: str) -> Dict[str, Any]:
         tl_symbol = self.symbol_map.get(underlying, underlying.split(':')[-1])
         stock_id = await trendlyne_api.get_stock_id(tl_symbol)
-        if stock_id:
-            return await trendlyne_api.get_oi_data(stock_id, expiry, time_str)
-        return {}
+        if not stock_id:
+            return {}
+
+        raw_data = await trendlyne_api.get_oi_data(stock_id, expiry, time_str)
+        if not raw_data:
+            return {}
+
+        # Trendlyne structure: body -> data -> live_oi_data (list of strikes)
+        # We need to transform this into: { "body": { "oiData": { "strike": {...} } }, "head": {"status": "0"} }
+        try:
+            items = []
+            if isinstance(raw_data, dict):
+                items = raw_data.get('body', {}).get('data', {}).get('live_oi_data', [])
+
+            if not items and isinstance(raw_data, list):
+                items = raw_data
+
+            oi_data = {}
+            for item in items:
+                # Handle multiple field name variations (Trendlyne uses snake_case usually)
+                strike = str(float(item.get('strike_price') or item.get('strikePrice') or 0))
+                if strike == "0.0": continue
+
+                oi_data[strike] = {
+                    'callOi': int(item.get('call_oi') or item.get('ce_oi') or item.get('callOi') or 0),
+                    'callOiChange': int(item.get('call_oi_chg') or item.get('ce_oi_chg') or item.get('callOiChange') or 0),
+                    'callVol': int(item.get('call_v') or item.get('ce_v') or item.get('callVol') or 0),
+                    'callLtp': float(item.get('call_ltp') or item.get('ce_ltp') or item.get('callLtp') or 0),
+                    'putOi': int(item.get('put_oi') or item.get('pe_oi') or item.get('putOi') or 0),
+                    'putOiChange': int(item.get('put_oi_chg') or item.get('pe_oi_chg') or item.get('putOiChange') or 0),
+                    'putVol': int(item.get('put_v') or item.get('pe_v') or item.get('putVol') or 0),
+                    'putLtp': float(item.get('put_ltp') or item.get('pe_ltp') or item.get('putLtp') or 0),
+                }
+
+            return {
+                'body': {'oiData': oi_data},
+                'head': {'status': '0' if oi_data else '1'}
+            }
+        except Exception as e:
+            logger.error(f"Error transforming Trendlyne data: {e}")
+            return {}
 
 
 class NSEOptionsProvider(IOptionsDataProvider):

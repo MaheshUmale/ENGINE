@@ -182,8 +182,8 @@ class OptionsManager:
                 spot_map = {c[0]: c[4] for c in hist_spot} if hist_spot else {}
 
                 # Use primary options provider
-                opt_provider = options_data_registry.get_primary()
-                expiries = await opt_provider.get_expiry_dates(underlying)
+                primary_opt_provider = options_data_registry.get_primary()
+                expiries = await primary_opt_provider.get_expiry_dates(underlying)
                 if not expiries:
                     continue
                 default_expiry = expiries[0]
@@ -192,6 +192,18 @@ class OptionsManager:
                     # Only skip if we already have a valid (non-zero) spot price for this slot
                     if ts_str in existing_times_with_price and existing_times_with_price[ts_str] > 0:
                         continue
+
+                    # For historical slots, prefer trendlyne or nse as they support historical time snapshots
+                    # Upstox V3 only returns live data, so it would just duplicate current data for the whole day
+                    is_past = ts_str < datetime.now(ist).strftime("%H:%M")
+                    opt_provider = primary_opt_provider
+
+                    if is_past:
+                        for name in ['trendlyne', 'nse']:
+                            p = options_data_registry.get_provider(name)
+                            if p:
+                                opt_provider = p
+                                break
 
                     data = await opt_provider.get_oi_data(underlying, default_expiry, ts_str)
                     if not data or data.get('head', {}).get('status') != '0':
@@ -543,10 +555,11 @@ class OptionsManager:
 
         # Query DuckDB for the earliest snapshot of today
         try:
+            # Standardize time comparison for DuckDB
             res = await asyncio.to_thread(db.query, """
                 SELECT strike, option_type, oi FROM options_snapshots
                 WHERE underlying = ? AND expiry = ?
-                AND CAST(timestamp AS DATE) = ?
+                AND CAST(timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' AS DATE) = ?
                 ORDER BY timestamp ASC
             """, (underlying, expiry_str, today_str))
 
@@ -1144,6 +1157,10 @@ class OptionsManager:
             "max_pain": latest_max_pain,
             "atm_straddle": atm_straddle,
             "iv_rank": iv_analysis.get('iv_rank', 0),
+            "iv_percentile": iv_analysis.get('iv_percentile', 0),
+            "net_delta": chain_res.get('net_delta', 0),
+            "net_theta": chain_res.get('net_theta', 0),
+            "avg_iv": sum(self.iv_history.get(underlying, [0])) / len(self.iv_history.get(underlying, [1])),
             "sentiment": "BULLISH" if control == "BUYERS_IN_CONTROL" else "BEARISH" if control == "SELLERS_IN_CONTROL" else "NEUTRAL"
         }
 

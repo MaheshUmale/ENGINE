@@ -18,7 +18,7 @@ class UpstoxAPIClient:
         self.api_client = upstox_client.ApiClient(self.configuration)
 
     async def get_hist_candles(self, symbol: str, interval: str, count: int = 5000, from_date: str = None, to_date: str = None) -> List[List]:
-        """Fetch historical candles from Upstox with client-side aggregation for unsupported timeframes."""
+        """Fetch historical candles from Upstox with client-side aggregation and intraday merging."""
         supported_intervals = ["1", "30", "1D", "1W", "1M", "D", "W"]
 
         # If the interval is not natively supported by Upstox, we'll fetch 1-min and aggregate
@@ -29,44 +29,64 @@ class UpstoxAPIClient:
         try:
             instrument_key = symbol_mapper.to_upstox_key(symbol)
             history_api = upstox_client.HistoryApi(self.api_client)
+
+            # Use provided range or fallback to historical defaults
+            # Map to Upstox specific interval strings
+            upstox_interval = "1minute" if fetch_interval == "1" else \
+                              "30minute" if fetch_interval == "30" else \
+                              "day" if fetch_interval in ["1D", "D"] else \
+                              "week" if fetch_interval in ["1W", "W"] else \
+                              "month" if fetch_interval in ["1M", "M"] else "1minute"
+
             now_str = to_date if to_date else datetime.now().strftime("%Y-%m-%d")
+            f_date = from_date
+            if not f_date:
+                days_back = 7 if upstox_interval == "1minute" else 30 if upstox_interval == "30minute" else 365
+                f_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
 
-            def fetch():
+            async def fetch_historical():
                 try:
-                    # Map to Upstox specific interval strings
-                    upstox_interval = "1minute" if fetch_interval == "1" else \
-                                      "30minute" if fetch_interval == "30" else \
-                                      "day" if fetch_interval in ["1D", "D"] else \
-                                      "week" if fetch_interval in ["1W", "W"] else \
-                                      "month" if fetch_interval in ["1M", "M"] else "1minute"
-
-                    # Use provided range or fallback to historical defaults
-                    f_date = from_date
-                    if not f_date:
-                        days_back = 7 if upstox_interval == "1minute" else 30 if upstox_interval == "30minute" else 365
-                        f_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
-
-                    res = history_api.get_historical_candle_data1(instrument_key, upstox_interval, now_str, f_date, "2.0")
-                    return res
+                    return await asyncio.to_thread(history_api.get_historical_candle_data1, instrument_key, upstox_interval, now_str, f_date, "2.0")
                 except ApiException as e:
-                    logger.error(f"Upstox API Error fetching candles for {symbol}: {e}")
+                    logger.error(f"Upstox API Error fetching historical candles for {symbol}: {e}")
                     return None
 
-            response = await asyncio.to_thread(fetch)
-            if response and response.status == "success":
-                raw_candles = response.data.candles
-                formatted = []
-                for c in raw_candles:
-                    try:
-                        # Upstox returns ISO format with +05:30 offset
-                        # Use fromisoformat which handles offsets since Python 3.7
-                        dt = datetime.fromisoformat(c[0])
-                        ts = int(dt.timestamp())
-                        formatted.append([ts, float(c[1]), float(c[2]), float(c[3]), float(c[4]), int(c[5])])
-                    except Exception as e:
-                        logger.warning(f"Error parsing Upstox candle: {e}")
-                formatted.sort(key=lambda x: x[0])
+            async def fetch_intraday():
+                try:
+                    # Intraday endpoint is only for sub-daily timeframes
+                    if upstox_interval in ["1minute", "30minute"]:
+                        return await asyncio.to_thread(history_api.get_intra_day_candle_data, instrument_key, upstox_interval, "2.0")
+                    return None
+                except ApiException as e:
+                    logger.error(f"Upstox API Error fetching intraday candles for {symbol}: {e}")
+                    return None
 
+            # Fetch both in parallel for efficiency
+            hist_task = fetch_historical()
+            intra_task = fetch_intraday()
+            hist_resp, intra_resp = await asyncio.gather(hist_task, intra_task)
+
+            raw_candles = []
+            seen_ts = set()
+
+            def process_response(resp):
+                if resp and resp.status == "success":
+                    for c in resp.data.candles:
+                        try:
+                            # Upstox returns ISO format with +05:30 offset
+                            dt = datetime.fromisoformat(c[0])
+                            ts = int(dt.timestamp())
+                            if ts not in seen_ts:
+                                raw_candles.append([ts, float(c[1]), float(c[2]), float(c[3]), float(c[4]), int(c[5])])
+                                seen_ts.add(ts)
+                        except Exception as e:
+                            logger.warning(f"Error parsing Upstox candle: {e}")
+
+            process_response(hist_resp)
+            process_response(intra_resp)
+
+            if raw_candles:
+                formatted = sorted(raw_candles, key=lambda x: x[0])
                 # Client-side aggregation if needed (e.g. 1m -> 5m)
                 if needs_aggregation:
                     try:

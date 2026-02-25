@@ -167,7 +167,32 @@
                     vertLines: { color: 'rgba(255,255,255,0.05)' },
                     horzLines: { color: 'rgba(255,255,255,0.05)' }
                 },
-                timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(255,255,255,0.1)' },
+                timeScale: {
+                    timeVisible: true,
+                    secondsVisible: false,
+                    borderColor: 'rgba(255,255,255,0.1)',
+                    tickMarkFormatter: (time, tickMarkType, locale) => {
+                        const date = new Date(time * 1000);
+                        return date.toLocaleTimeString('en-IN', {
+                            timeZone: 'Asia/Kolkata',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: false
+                        });
+                    }
+                },
+                localization: {
+                    timeFormatter: (time) => {
+                        const date = new Date(time * 1000);
+                        return date.toLocaleTimeString('en-IN', {
+                            timeZone: 'Asia/Kolkata',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: false
+                        });
+                    }
+                },
                 rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
                 crosshair: { mode: 0 }
             });
