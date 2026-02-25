@@ -24,6 +24,7 @@ class TradingBot:
         self.instruments = {}
         self.candle_buffers = {} # instrument -> interval -> current_candle
         self.candle_buffers_5m = {} # instrument -> current_candle
+        self.last_signal_time = {} # index_name -> last_signal_timestamp
         self.loop = loop or asyncio.get_event_loop()
 
     def handle_tick_sync(self, feeds):
@@ -138,6 +139,11 @@ class TradingBot:
         # Run strategy signals on every tick if reference levels exist
         signal = engine.generate_signals(instruments)
         if signal:
+            # Prevent multiple signals in the same minute for the same index
+            last_sig = self.last_signal_time.get(index_name)
+            if last_sig == minute:
+                return
+
             signal.timestamp = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
             # Enrich signal with bid/ask for dynamic slippage
@@ -166,7 +172,8 @@ class TradingBot:
 
             # For live, we can use current index price
             idx_data = engine.current_data.get(instruments['index'], {})
-            self.execution.execute_signal(signal, index_price=idx_data.get('ltp'))
+            if self.execution.execute_signal(signal, index_price=idx_data.get('ltp')):
+                 self.last_signal_time[index_name] = minute
 
             # Send Alert
             asyncio.create_task(self.alert_manager.send_notification(

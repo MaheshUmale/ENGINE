@@ -6,6 +6,7 @@
     <title>PRODESK | Advanced Backtester</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,800&display=swap');
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0f172a; color: #f8fafc; }
@@ -114,10 +115,12 @@
                 <div class="p-4 border-b border-white/5 flex items-center justify-between">
                     <div class="flex gap-4">
                         <button class="text-[10px] font-black text-blue-500 border-b-2 border-blue-500 pb-1">Equity Curve</button>
+                        <button class="text-[10px] font-black text-gray-500 hover:text-white pb-1">Price Chart</button>
                         <button class="text-[10px] font-black text-gray-500 hover:text-white pb-1">Trade Log</button>
                     </div>
                 </div>
                 <div id="equity_chart" class="flex-1 w-full bg-black/10"></div>
+                <div id="price_chart_container" class="hidden flex-1 w-full bg-black/10"></div>
                 <div id="trade_log" class="hidden flex-1 overflow-y-auto custom-scrollbar p-4">
                     <table class="w-full text-[10px] border-collapse">
                         <thead>
@@ -138,6 +141,29 @@
     </main>
 
     <script>
+        let priceChart, mainSeries;
+
+        function initPriceChart() {
+            const container = document.getElementById('price_chart_container');
+            priceChart = LightweightCharts.createChart(container, {
+                layout: { background: { type: 'solid', color: '#0f172a' }, textColor: '#d1d5db' },
+                grid: {
+                    vertLines: { color: 'rgba(255,255,255,0.05)' },
+                    horzLines: { color: 'rgba(255,255,255,0.05)' }
+                },
+                timeScale: {
+                    timeVisible: true,
+                    borderColor: 'rgba(255,255,255,0.1)',
+                },
+                rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
+            });
+            mainSeries = priceChart.addCandlestickSeries({ upColor: '#22c55e', downColor: '#ef4444' });
+
+            window.addEventListener('resize', () => {
+                priceChart.resize(container.clientWidth, container.clientHeight);
+            });
+        }
+
         document.getElementById('backtestForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const runBtn = document.getElementById('runBtn');
@@ -176,6 +202,8 @@
         });
 
         function updateDashboard(report) {
+            if (!priceChart) initPriceChart();
+
             document.getElementById('stat_pnl').innerText = `₹${report.total_pnl.toFixed(2)}`;
             document.getElementById('stat_winrate').innerText = `${report.win_rate.toFixed(1)}%`;
             document.getElementById('stat_trades').innerText = report.trade_count;
@@ -192,6 +220,31 @@
                     yaxis: { gridcolor: 'rgba(255,255,255,0.05)', zeroline: false },
                     height: 400
                 }, { responsive: true, displayModeBar: false });
+            }
+
+            if (report.candles && report.candles.length > 0) {
+                const candleData = report.candles.map(c => ({
+                    time: c[0], open: c[1], high: c[2], low: c[3], close: c[4]
+                }));
+                mainSeries.setData(candleData);
+
+                // Add trade markers
+                const markers = [];
+                report.trades.forEach(t => {
+                    const ts = Math.floor(new Date(t.timestamp).getTime() / 1000);
+                    // Entry Marker
+                    markers.push({
+                        time: ts,
+                        position: t.instrument.includes('CE') ? 'belowBar' : 'aboveBar',
+                        color: '#3b82f6',
+                        shape: t.instrument.includes('CE') ? 'arrowUp' : 'arrowDown',
+                        text: 'ENTRY'
+                    });
+                    // Exit Marker (if timestamp is different, but for now we only have one timestamp in report.trades)
+                    // Actually our report.trades has entry timestamp.
+                });
+                mainSeries.setMarkers(markers.sort((a,b) => a.time - b.time));
+                priceChart.timeScale().fitContent();
             }
 
             const logBody = document.getElementById('log_body');
@@ -223,8 +276,14 @@
                 btn.classList.add('text-blue-500', 'border-b-2', 'border-blue-500');
                 btn.classList.remove('text-gray-500');
 
-                document.getElementById('equity_chart').classList.toggle('hidden', idx === 1);
-                document.getElementById('trade_log').classList.toggle('hidden', idx === 0);
+                document.getElementById('equity_chart').classList.toggle('hidden', idx !== 0);
+                document.getElementById('price_chart_container').classList.toggle('hidden', idx !== 1);
+                document.getElementById('trade_log').classList.toggle('hidden', idx !== 2);
+
+                if (idx === 1 && priceChart) {
+                    const container = document.getElementById('price_chart_container');
+                    priceChart.resize(container.clientWidth, container.clientHeight);
+                }
             };
         });
 

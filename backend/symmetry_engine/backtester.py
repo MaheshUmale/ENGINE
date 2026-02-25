@@ -182,7 +182,7 @@ class Backtester:
 
             # Use forward fill for prices and OI to handle missing candles, then fill remaining NaNs with 0
             combined = combined.dropna(subset=['close_idx'])
-            combined = combined.sort_values('timestamp').ffill().fillna(0)
+            combined = combined.sort_values('timestamp').drop_duplicates('timestamp').ffill().fillna(0)
 
             # Pre-calculate 5m candles for backtest
             combined_5m = combined.resample('5min', on='timestamp').agg({
