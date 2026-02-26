@@ -16,7 +16,7 @@ from config import OPTIONS_UNDERLYINGS, SNAPSHOT_CONFIG
 from db.local_db import db
 from core.interfaces import ILiveStreamProvider
 from core.provider_registry import options_data_registry, historical_data_registry, live_stream_registry
-from core.utils import safe_int, safe_float
+from core.utils import safe_int, safe_float, sanitize_float
 from external.tv_options_wss import OptionsWSS
 
 # Import new modules
@@ -205,12 +205,19 @@ class OptionsManager:
                                 opt_provider = p
                                 break
 
-                    data = await opt_provider.get_oi_data(underlying, default_expiry, ts_str)
+                    try:
+                        data = await opt_provider.get_oi_data(underlying, default_expiry, ts_str)
+                    except Exception as e:
+                        logger.error(f"Provider {type(opt_provider).__name__} failed during backfill for {underlying} at {ts_str}: {e}")
+                        continue
+
                     if not data or data.get('head', {}).get('status') != '0':
                         continue
 
                     body = data.get('body', {})
                     oi_data = body.get('oiData', {})
+                    if not oi_data:
+                        continue
 
                     ist_dt = now.replace(
                         hour=int(ts_str.split(':')[0]),
@@ -228,14 +235,18 @@ class OptionsManager:
                         if potential_ts:
                             spot_price = spot_map[potential_ts[-1]]
 
-                    # Process chain data with enhanced metrics
-                    rows = await self._process_oi_data(
-                        oi_data, underlying, default_expiry, {}, spot_price, "backfill"
-                    )
+                    try:
+                        # Process chain data with enhanced metrics
+                        rows = await self._process_oi_data(
+                            oi_data, underlying, default_expiry, {}, spot_price, "backfill"
+                        )
 
-                    if rows:
-                        db.insert_options_snapshot(rows)
-                        await self._calculate_pcr(underlying, snapshot_time, rows, spot_price)
+                        if rows:
+                            db.insert_options_snapshot(rows)
+                            await self._calculate_pcr(underlying, snapshot_time, rows, spot_price)
+                            logger.info(f"Backfilled {underlying} for {ts_str} (Spot: {spot_price})")
+                    except Exception as e:
+                        logger.error(f"Error processing backfill for {underlying} at {ts_str}: {e}")
 
                 logger.info(f"Backfill complete for {underlying}")
                 await asyncio.sleep(1)
@@ -505,15 +516,16 @@ class OptionsManager:
             """, tuple(target_keys))
 
             if res and res[0]['price'] > 0:
-                logger.info(f"Spot Price discovered from Ticks for {underlying}: {res[0]['price']}")
-                return res[0]['price']
+                price = sanitize_float(res[0]['price'])
+                logger.info(f"Spot Price discovered from Ticks for {underlying}: {price}")
+                return price
 
             # Layer 2: Historical Candles (Provider Registry)
             logger.info(f"Spot not in ticks for {underlying}, trying historical candles...")
             hist_provider = historical_data_registry.get_primary()
             hist = await hist_provider.get_hist_candles(underlying, '1', 5)
             if hist and len(hist) > 0:
-                price = hist[0][4]  # Close of most recent candle
+                price = sanitize_float(hist[0][4])
                 if price > 0:
                     logger.info(f"Spot Price discovered from Hist Candles for {underlying}: {price}")
                     return price
@@ -956,7 +968,9 @@ class OptionsManager:
         avg_iv = sum(r.get('iv', 0) for r in rows) / len(rows) if rows else 0
         if underlying not in self.iv_history:
             self.iv_history[underlying] = []
-        self.iv_history[underlying].append(avg_iv)
+
+        # Ensure we only append valid numbers
+        self.iv_history[underlying].append(sanitize_float(avg_iv))
 
         # Keep only last 252 data points
         self.iv_history[underlying] = self.iv_history[underlying][-252:]
@@ -1010,8 +1024,8 @@ class OptionsManager:
             "chain": chain,
             "spot_price": spot_price,
             "source": source,
-            "net_delta": round(net_delta, 2),
-            "net_theta": round(net_theta, 2)
+            "net_delta": sanitize_float(round(net_delta, 2)),
+            "net_theta": sanitize_float(round(net_theta, 2))
         }
 
     def get_oi_buildup_analysis(self, underlying: str) -> Dict[str, Any]:
@@ -1149,7 +1163,11 @@ class OptionsManager:
         # Get IV Rank
         iv_analysis = self.get_iv_analysis(underlying)
 
-        return {
+        # Safely calculate average IV
+        iv_hist = self.iv_history.get(underlying, [])
+        avg_iv = sum(iv_hist) / len(iv_hist) if iv_hist else 0
+
+        res = {
             "distribution": distribution,
             "control": control,
             "sideways_expected": sideways,
@@ -1160,9 +1178,24 @@ class OptionsManager:
             "iv_percentile": iv_analysis.get('iv_percentile', 0),
             "net_delta": chain_res.get('net_delta', 0),
             "net_theta": chain_res.get('net_theta', 0),
-            "avg_iv": sum(self.iv_history.get(underlying, [0])) / len(self.iv_history.get(underlying, [1])),
+            "avg_iv": avg_iv,
             "sentiment": "BULLISH" if control == "BUYERS_IN_CONTROL" else "BEARISH" if control == "SELLERS_IN_CONTROL" else "NEUTRAL"
         }
+
+        # Final recursive JSON-safety check
+        import math
+        def sanitize(obj):
+            if isinstance(obj, dict):
+                return {k: sanitize(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [sanitize(x) for x in obj]
+            elif isinstance(obj, float):
+                if math.isinf(obj) or math.isnan(obj):
+                    return 0.0
+                return round(obj, 4)
+            return obj
+
+        return sanitize(res)
 
     async def repair_zero_spot_prices(self):
         """Identifies and repairs records in pcr_history that have 0 or invalid spot prices."""
