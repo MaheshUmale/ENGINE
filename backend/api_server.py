@@ -10,7 +10,7 @@ import httpx
 import pandas as pd
 import io
 import socketio
-from datetime import datetime, date
+from datetime import datetime
 from typing import Any, Optional, List
 from contextlib import asynccontextmanager
 from logging.config import dictConfig
@@ -102,7 +102,7 @@ async def lifespan(app: FastAPI):
     main_loop = asyncio.get_running_loop()
 
     data_engine.set_socketio(sio, loop=main_loop)
-    data_engine.start_websocket_thread(None, INITIAL_INSTRUMENTS)
+    data_engine.start_websocket_thread(INITIAL_INSTRUMENTS)
 
     options_manager.set_socketio(sio, loop=main_loop)
     await options_manager.start()

@@ -80,8 +80,7 @@ class LocalDB:
                 ts_ms BIGINT,
                 price DOUBLE,
                 qty BIGINT,
-                source VARCHAR,
-                full_feed JSON
+                source VARCHAR
             )
         """)
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_ticks_date_key_ts ON ticks (date, instrumentKey, ts_ms)")
@@ -179,6 +178,10 @@ class LocalDB:
             logger.error(f"Error migrating pcr_history: {e}")
 
     def insert_ticks(self, ticks: List[Dict[str, Any]]):
+        """
+        Inserts a batch of ticks into the DuckDB ticks table.
+        Optimized to store only essential fields, reducing storage overhead.
+        """
         if not ticks: return
         data = []
         for t in ticks:
@@ -193,15 +196,15 @@ class LocalDB:
                 'ts_ms': ts_ms,
                 'price': price,
                 'qty': qty,
-                'source': t.get('source', 'live'),
-                'full_feed': json.dumps(t, cls=LocalDBJSONEncoder)
+                'source': t.get('source', 'live')
             })
 
         df = pd.DataFrame(data)
         with self._execute_lock:
             self.conn.execute("INSERT INTO ticks SELECT * FROM df")
             self._batch_count += 1
-            if self._batch_count >= 10:
+            # Periodic checkpoint to ensure data is persisted and WAL is managed
+            if self._batch_count >= 50:
                 self.conn.execute("CHECKPOINT")
                 self._batch_count = 0
 

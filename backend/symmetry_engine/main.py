@@ -15,6 +15,17 @@ from config import (
 from .database import init_db, get_session, Candle
 
 class TradingBot:
+    """
+    Main orchestrator for the Symmetry & Panic trading strategy.
+
+    This class handles:
+    - Real-time tick ingestion from the Data Engine
+    - Multi-timeframe OHLC aggregation (1m, 5m)
+    - Reference Level discovery (Symmetry Walls)
+    - Signal generation and Multi-Index sync
+    - Order execution and Position management (Paper Trading)
+    - State recovery and Warmup from historical data
+    """
     def __init__(self, loop=None):
         self.data_provider = DataProvider(ACCESS_TOKEN)
         self.engines = {name: StrategyEngine(name, session_factory=get_session) for name in INDICES}

@@ -84,6 +84,17 @@ class OptionsManager:
             )
 
     async def start(self):
+        """
+        Starts the options management services.
+
+        Initialization sequence:
+        1. Refreshes WSS symbols for all active underlyings.
+        2. Triggers background backfill of today's data.
+        3. Starts the snapshot loop (every 3 minutes).
+        4. Starts the dynamic ATM tracking loop (every 60 seconds).
+        5. Starts live WebSocket connections for all underlyings.
+        6. Creates preset alerts.
+        """
         if self.running:
             return
         self.running = True
