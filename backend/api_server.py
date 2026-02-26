@@ -546,6 +546,7 @@ async def get_pcr_trend(underlying: str):
         FROM pcr_history WHERE underlying = ?
         AND CAST((timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata' AS DATE) =
             (SELECT CAST(MAX(timestamp) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' AS DATE) FROM pcr_history WHERE underlying = ?)
+        AND CAST((timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata' AS TIME) >= '09:15:00'
         GROUP BY timestamp ORDER BY timestamp ASC
     """, (underlying, underlying), json_serialize=True)
 
@@ -602,6 +603,7 @@ async def get_oi_trend_detailed(underlying: str):
         WHERE s.underlying = ?
         AND CAST(s.timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' AS DATE) =
             (SELECT CAST(MAX(timestamp) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' AS DATE) FROM options_snapshots WHERE underlying = ?)
+        AND CAST(s.timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' AS TIME) >= '09:15:00'
         GROUP BY s.timestamp
         ORDER BY s.timestamp ASC
     """, (underlying, underlying), json_serialize=True)
