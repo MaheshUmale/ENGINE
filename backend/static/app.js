@@ -642,6 +642,13 @@ class ChartInstance {
         }
     }
 
+    /**
+     * Renders the Open Interest (OI) Profile as a vertical histogram on a canvas overlay.
+     * Logic uses a 'Base + Delta' approach:
+     * - Base (Ghost bar): Represents the total OI at that strike (faded).
+     * - Delta (Prominent bar): Represents the difference between Call and Put OI.
+     * - Scaling is independent for Delta to ensure small differences are visible.
+     */
     renderOIProfile() {
         if (!this.showOIProfile || !this.oiData) {
             this.clearOIProfile();
@@ -653,6 +660,7 @@ class ChartInstance {
         const width = this.container.clientWidth;
         const height = this.container.clientHeight;
 
+        // Resize canvas to match container if needed
         if (canvas.width !== width || canvas.height !== height) {
             canvas.width = width;
             canvas.height = height;
@@ -662,12 +670,13 @@ class ChartInstance {
         const data = this.oiData;
         const strikes = [...new Set(data.chain.map(c => c.strike))].sort((a, b) => a - b);
 
-        // Filter strikes to visible range to optimize and find local max
+        // Filter strikes to visible range to optimize and find local max for scaling
         let maxOI = 0;
         const strikesInRange = [];
 
         strikes.forEach(s => {
             const y = this.mainSeries.priceToCoordinate(s);
+            // Only process strikes that are currently visible on the Y-axis
             if (y !== null && y >= 0 && y <= height) {
                 const call = data.chain.find(c => c.strike === s && c.option_type === 'call') || {oi: 0};
                 const put = data.chain.find(c => c.strike === s && c.option_type === 'put') || {oi: 0};
@@ -678,7 +687,7 @@ class ChartInstance {
 
         if (maxOI === 0) return;
 
-        // Find local max delta for prominent scaling
+        // Find local max delta for prominent scaling of the difference bars
         let maxDelta = 0;
         strikesInRange.forEach(s => maxDelta = Math.max(maxDelta, Math.abs(s.call - s.put)));
 
@@ -691,32 +700,33 @@ class ChartInstance {
             const delta = Math.abs(call - put);
             const isCallHeavier = call > put;
 
-            // 1. Calculate lengths
+            // 1. Calculate lengths based on max values in the visible range
             const totalLen = (Math.max(call, put) / maxOI) * totalBarMaxWidth;
             // Independent scaling for delta to make even small differences visible
             const deltaLen = maxDelta > 0 ? (delta / maxDelta) * deltaBarMaxWidth : 0;
 
             // 2. Draw Total Background (Ghost Bar)
+            // This shows the 'scale' of activity at this strike regardless of bias
             ctx.fillStyle = 'rgba(148, 163, 184, 0.15)';
             ctx.fillRect(width - totalLen, y - barHeight/2, totalLen, barHeight);
 
             // 3. Draw Difference Bar (Prominent)
-            // Color Red if Call dominated, Green if Put dominated
+            // Color Red if Call dominated (Resistance), Green if Put dominated (Support)
             ctx.fillStyle = isCallHeavier ? 'rgba(239, 68, 68, 0.9)' : 'rgba(34, 197, 94, 0.9)';
             ctx.fillRect(width - deltaLen, y - barHeight/2, deltaLen, barHeight);
 
-            // Highlight edge of delta
+            // Highlight edge of delta for crispness
             ctx.strokeStyle = isCallHeavier ? '#ef4444' : '#22c55e';
             ctx.lineWidth = 1;
             ctx.strokeRect(width - deltaLen, y - barHeight/2, deltaLen, barHeight);
 
-            // 4. Labels
+            // 4. Labels (e.g., "1.5M Δ")
             const deltaM = (delta / 1000000).toFixed(1);
             if (delta > 0) {
                 ctx.fillStyle = isCallHeavier ? '#fca5a5' : '#86efac';
                 ctx.font = 'black 9px sans-serif';
                 ctx.textAlign = 'right';
-                // Show delta value prominently
+                // Position label to the left of the longest bar
                 ctx.fillText(`${deltaM}M Δ`, width - Math.max(deltaLen, totalLen) - 5, y + 3);
             }
         });

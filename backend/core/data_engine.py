@@ -332,13 +332,15 @@ def handle_disconnect(sid: str):
     for key, interval in to_cleanup:
         unsubscribe_instrument(key, sid, interval)
 
-def start_websocket_thread(token: str, keys: List[str]):
+def start_websocket_thread(keys: Optional[List[str]] = None):
+    """Initializes and starts all registered live stream providers."""
     from core.provider_registry import initialize_default_providers
     initialize_default_providers()
+    subscribe_keys = keys or INITIAL_INSTRUMENTS
     for provider in live_stream_registry.get_all():
         try:
             provider.set_callback(on_message)
             provider.start()
-            provider.subscribe(INITIAL_INSTRUMENTS)
+            provider.subscribe(subscribe_keys)
         except Exception as e:
             logger.error(f"Error starting provider during init: {e}")
