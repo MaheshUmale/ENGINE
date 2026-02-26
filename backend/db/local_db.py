@@ -194,6 +194,7 @@ class LocalDB:
         Optimized to store only essential fields, reducing storage overhead.
         """
         if not ticks: return
+        cols = ['date', 'instrumentKey', 'ts_ms', 'price', 'qty', 'source']
         data = []
         for t in ticks:
             # Robust type casting using shared utilities
@@ -210,9 +211,13 @@ class LocalDB:
                 'source': t.get('source', 'live')
             })
 
-        df = pd.DataFrame(data)
+        df = pd.DataFrame(data)[cols]
         with self._execute_lock:
-            self.conn.execute("INSERT INTO ticks SELECT * FROM df")
+            # Register the dataframe and use explicit column names for the INSERT
+            self.conn.register('df_ticks', df)
+            self.conn.execute(f"INSERT INTO ticks ({', '.join(cols)}) SELECT * FROM df_ticks")
+            self.conn.unregister('df_ticks')
+
             self._batch_count += 1
             # Periodic checkpoint to ensure data is persisted and WAL is managed
             if self._batch_count >= 50:
