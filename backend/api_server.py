@@ -755,10 +755,6 @@ async def serve_index(request: Request, symbol: Optional[str] = None, interval: 
 @fastapi_app.get("/options")
 async def serve_options(request: Request): return templates.TemplateResponse("options_dashboard.html", {"request": request})
 
-@fastapi_app.get("/symmetry")
-async def serve_symmetry(request: Request):
-    return templates.TemplateResponse("symmetry_dashboard.html", {"request": request})
-
 @fastapi_app.get("/backtest")
 async def serve_backtest(request: Request):
     return templates.TemplateResponse("backtest_gui.html", {"request": request})
@@ -791,12 +787,18 @@ async def run_backtest_api(request: Request):
         bt.params = params
 
         # Run backtest
+        logger.info(f"Running backtest for {index_name} with params: {params}")
         final_df = await bt.run_backtest(from_date, to_date)
 
         # Generate Report from the specific backtest DB
         session = bt.get_backtest_session()
         # Query BUY trades that are CLOSED, as they contain entry_price, exit_price and pnl
+        # We also need the exit timestamp which is stored in the corresponding SELL trade
         trades = session.query(Trade).filter(Trade.status == 'CLOSED', Trade.side == 'BUY').order_by(Trade.timestamp.asc()).all()
+
+        # Helper to find exit timestamps
+        sell_trades = session.query(Trade).filter(Trade.status == 'CLOSED', Trade.side == 'SELL').all()
+        exit_map = {(t.index_name, t.instrument_key, t.quantity, t.pnl): t.timestamp for t in sell_trades}
 
         # Candles for chart
         candles = []
@@ -818,8 +820,14 @@ async def run_backtest_api(request: Request):
             cum_pnl += t.pnl
             # Naive IST timestamps from backtester are treated as UTC for epoch calculation
             ts_epoch = int(t.timestamp.replace(tzinfo=datetime.timezone.utc).timestamp())
+
+            # Find exit timestamp
+            exit_ts = exit_map.get((t.index_name, t.instrument_key, t.quantity, t.pnl))
+            exit_ts_epoch = int(exit_ts.replace(tzinfo=datetime.timezone.utc).timestamp()) if exit_ts else ts_epoch + 300 # Fallback 5m
+
             trade_list.append({
                 "timestamp": ts_epoch,
+                "exit_timestamp": exit_ts_epoch,
                 "index": t.index_name,
                 "instrument": t.instrument_key,
                 "price": t.price, # Used as entry price in GUI

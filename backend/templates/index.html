@@ -193,6 +193,36 @@
                 </button>
             </div>
             <div id="sidebarContent" class="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
+                <!-- Bot Performance (Symmetry Integrated) -->
+                <div class="space-y-2">
+                    <h4 class="text-[9px] font-black text-blue-500 uppercase tracking-widest">Symmetry Bot Performance</h4>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="p-2 bg-blue-500/5 border border-blue-500/10 rounded-lg">
+                            <div class="text-[8px] text-gray-500 uppercase font-bold">Total PnL</div>
+                            <div id="side-bot-pnl" class="text-xs font-black text-white">₹0.00</div>
+                        </div>
+                        <div class="p-2 bg-blue-500/5 border border-blue-500/10 rounded-lg">
+                            <div class="text-[8px] text-gray-500 uppercase font-bold">Win Rate</div>
+                            <div id="side-bot-winrate" class="text-xs font-black text-white">0%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Portfolio Exposure -->
+                <div class="space-y-2">
+                    <h4 class="text-[9px] font-black text-purple-500 uppercase tracking-widest">Portfolio Exposure</h4>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="p-2 bg-purple-500/5 border border-purple-500/10 rounded-lg">
+                            <div class="text-[8px] text-gray-500 uppercase font-bold">Net Delta</div>
+                            <div id="side-port-delta" class="text-xs font-black text-white">0.00</div>
+                        </div>
+                        <div class="p-2 bg-purple-500/5 border border-purple-500/10 rounded-lg">
+                            <div class="text-[8px] text-gray-500 uppercase font-bold">Net Theta</div>
+                            <div id="side-port-theta" class="text-xs font-black text-white">0.00</div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Genie Insights -->
                 <div class="space-y-2">
                     <h4 class="text-[9px] font-black text-gray-500 uppercase tracking-tighter">OiGenie Prediction</h4>
@@ -295,7 +325,13 @@
                 </div>
 
                 <div class="space-y-4">
-                    <p class="text-[10px] text-gray-400 font-bold uppercase italic">Write a JS function that receives 'candles' and returns an array of {time, value} objects.</p>
+                    <div class="flex justify-between items-center">
+                        <p class="text-[10px] text-gray-400 font-bold uppercase italic">Function (candles) => [{time, value}]</p>
+                        <div class="flex gap-2">
+                            <button onclick="setScriptTemplate('sma')" class="text-[8px] font-black px-2 py-1 bg-white/5 hover:bg-blue-500/20 rounded border border-white/5 transition-all uppercase">SMA 20</button>
+                            <button onclick="setScriptTemplate('mid')" class="text-[8px] font-black px-2 py-1 bg-white/5 hover:bg-blue-500/20 rounded border border-white/5 transition-all uppercase">Mid-Price</button>
+                        </div>
+                    </div>
                     <textarea id="customIndicatorCode" class="w-full h-64 bg-gray-950 border border-white/10 rounded-xl p-4 text-[11px] font-mono text-blue-300 outline-none focus:border-blue-500 transition-all custom-scrollbar" spellcheck="false" placeholder="(candles) => {
     return candles.map(c => ({
         time: c.time,
@@ -400,6 +436,28 @@
             symbol: "{{ initial_symbol }}",
             interval: "{{ initial_interval }}"
         };
+
+        function setScriptTemplate(type) {
+            const textarea = document.getElementById('customIndicatorCode');
+            if (type === 'sma') {
+                textarea.value = `(candles) => {
+    const period = 20;
+    return candles.map((c, i) => {
+        if (i < period) return null;
+        const slice = candles.slice(i - period + 1, i + 1);
+        const sum = slice.reduce((a, b) => a + b.close, 0);
+        return { time: c.time, value: sum / period };
+    }).filter(v => v !== null);
+}`;
+            } else if (type === 'mid') {
+                textarea.value = `(candles) => {
+    return candles.map(c => ({
+        time: c.time,
+        value: (c.high + c.low) / 2
+    }));
+}`;
+            }
+        }
     </script>
     <script src="/static/app.js?v=4"></script>
 </body>

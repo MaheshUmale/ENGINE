@@ -45,7 +45,16 @@ class TradingBot:
 
             # Update engine with latest tick data
             for index_name, engine in self.engines.items():
-                if key in self.instruments.get(index_name, {}).values():
+                is_atm = key in self.instruments.get(index_name, {}).values()
+
+                # Also check if it's a key for an active position strike
+                is_pos_key = False
+                if index_name in self.execution.positions:
+                    pos = self.execution.positions[index_name]
+                    if key in [pos.get('ce_key'), pos.get('pe_key')]:
+                        is_pos_key = True
+
+                if is_atm or is_pos_key:
                     oi_delta = self.data_provider.calculate_oi_delta(key, oi)
                     engine.update_data(key, {
                         'ltp': ltp,
@@ -223,10 +232,12 @@ class TradingBot:
         print("State Recovery: Initializing...")
 
         # 1. Recover positions and risk metrics
+        print("State Recovery: Step 1/3 - Reloading positions and risk metrics...")
         await asyncio.to_thread(self.execution.recover_positions)
         await asyncio.to_thread(self.risk_manager.recover_pnl)
 
         # 2. Recover StrategyEngine states (Reference Levels and Instruments)
+        print("State Recovery: Step 2/3 - Recovering reference levels and instrument metadata...")
         session = await asyncio.to_thread(get_session)
         try:
             from .database import ReferenceLevel
@@ -248,6 +259,8 @@ class TradingBot:
                             'pe_price': last_ref.pe_price,
                             'type': last_ref.type
                         }
+                        print(f"State Recovery: Recovered {level_type} level for {index_name} at ₹{last_ref.index_price}")
+
                         # Also recover the instruments if not already discovered
                         if index_name not in self.instruments:
                             self.instruments[index_name] = {
@@ -255,9 +268,10 @@ class TradingBot:
                                 'ce': last_ref.instrument_ce,
                                 'pe': last_ref.instrument_pe
                             }
-                            print(f"State Recovery: Recovered instruments for {index_name} from RefLevel")
+                            print(f"State Recovery: Recovered ATM instruments for {index_name} from ReferenceLevel")
 
                 # 3. Recover active trailing stop losses for restored positions
+                print("State Recovery: Step 3/3 - Warming up historical data for active position strikes...")
                 if index_name in self.execution.positions:
                     pos = self.execution.positions[index_name]
                     if pos.get('trailing_sl'):
@@ -444,6 +458,13 @@ class TradingBot:
             if details:
                 self.instruments[name] = details
                 all_keys.extend([details['index'], details['ce'], details['pe'], details['fut']])
+
+        # Ensure recovered position keys are subscribed
+        for pos in self.execution.positions.values():
+            if pos.get('ce_key'): all_keys.append(pos['ce_key'])
+            if pos.get('pe_key'): all_keys.append(pos['pe_key'])
+
+        all_keys = list(set(all_keys)) # Deduplicate
 
         # 2. Warmup strategy with historical data
         await self.warmup()

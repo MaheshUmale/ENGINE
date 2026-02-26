@@ -428,6 +428,9 @@ class ChartInstance {
 
             if (!Array.isArray(data)) throw new Error("Script must return an array of {time, value}");
 
+            // Filter out invalid data points
+            const cleanData = data.filter(d => d && typeof d.time === 'number' && typeof d.value === 'number');
+
             if (!this.customIndicatorSeries) {
                 this.customIndicatorSeries = this.chart.addLineSeries({
                     color: '#f97316',
@@ -438,11 +441,18 @@ class ChartInstance {
                 });
             }
 
-            this.customIndicatorSeries.setData(data.map(d => ({ ...d, time: Number(d.time) })));
-            console.log("[Chart] Custom script applied successfully");
+            this.customIndicatorSeries.setData(cleanData.map(d => ({ ...d, time: Number(d.time) })));
+            console.log(`[Chart] Custom script applied successfully (${cleanData.length} points)`);
         } catch (err) {
             console.error("[Chart] Custom script error:", err);
-            alert("Script Error: " + err.message);
+            // Visual feedback on the terminal for script errors
+            const logList = document.getElementById('sideLogsList');
+            if (logList) {
+                const log = document.createElement('p');
+                log.className = 'text-red-500 font-bold';
+                log.innerText = `[SCRIPT ERROR] ${err.message}`;
+                logList.prepend(log);
+            }
         }
     }
 
@@ -1022,6 +1032,7 @@ class MultiChartEngine {
         this.setupEventListeners();
         this.setupSearch();
         this.loadLayout();
+        this.startStatsRefresh();
         window.addEventListener('resize', () => {
             this.charts.forEach(c => {
                 c.chart.resize(c.container.clientWidth, c.container.clientHeight);
@@ -1368,6 +1379,35 @@ class MultiChartEngine {
         document.getElementById('loading').classList.toggle('hidden', !show);
     }
 
+    async startStatsRefresh() {
+        const refresh = async () => {
+            try {
+                const [statsRes, greeksRes] = await Promise.all([
+                    fetch('/api/symmetry/stats'),
+                    fetch('/api/symmetry/portfolio-greeks')
+                ]);
+
+                if (statsRes.ok) {
+                    const stats = await statsRes.json();
+                    document.getElementById('side-bot-pnl').innerText = `₹${stats.total_pnl.toFixed(2)}`;
+                    document.getElementById('side-bot-pnl').className = `text-xs font-black ${stats.total_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`;
+                    document.getElementById('side-bot-winrate').innerText = `${stats.win_rate.toFixed(1)}%`;
+                }
+
+                if (greeksRes.ok) {
+                    const greeks = await greeksRes.json();
+                    document.getElementById('side-port-delta').innerText = greeks.delta.toFixed(2);
+                    document.getElementById('side-port-delta').className = `text-xs font-black ${greeks.delta >= 0 ? 'text-green-400' : 'text-red-400'}`;
+                    document.getElementById('side-port-theta').innerText = greeks.theta.toFixed(2);
+                }
+            } catch (e) {
+                console.warn("[MultiChartEngine] Stats refresh failed:", e);
+            }
+        };
+
+        refresh();
+        setInterval(refresh, 10000);
+    }
 
     loadLayout() {
         const theme = localStorage.getItem('theme') || 'dark';

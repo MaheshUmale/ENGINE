@@ -98,16 +98,17 @@ class StrategyEngine:
         """
         Identify Significant Swings where a 'Wall' exists.
         Expert Optimization:
-        1. Uses a 15-minute window for structural relevance.
+        1. Uses a custom window for structural relevance.
         2. Requires move magnitude > 1.2 * ATR to filter noise.
         3. Requires 3-candle pullback for stronger confirmation of 'The Wall'.
         """
+        window = getattr(self, 'swing_window', 15)
         if isinstance(candles, list):
-            if len(candles) < 15: return None
+            if len(candles) < window: return None
             df = pd.DataFrame(candles)
             return self.identify_swing(df)
 
-        if len(candles) < 15:
+        if len(candles) < window:
             return None
 
         # Calculate ATR for the index
@@ -115,8 +116,8 @@ class StrategyEngine:
         # High threshold for 'Expert' scalping: Move must be significant
         atr_threshold = atr * 1.2 if atr > 0 else 5.0
 
-        # Structural high/low in the 15-minute window
-        last_n = candles.tail(15)
+        # Structural high/low in the custom window
+        last_n = candles.tail(window)
         current_high = last_n['high'].max()
         current_low = last_n['low'].min()
 
@@ -248,9 +249,10 @@ class StrategyEngine:
                     score += 1
                     details['decay_filter'] = True
 
-                # Confluence Logic: Fallback to score >= 4 if OI data is missing (Backtests)
+                # Confluence Logic: Fallback to score >= threshold - 1 if OI data is missing (Backtests)
                 has_oi_data = float(ce_data.get('oi', 0)) > 0 or abs(float(ce_data.get('oi_delta', 0))) > 0
-                is_valid = (score >= 5 and details.get('oi_panic')) if has_oi_data else (score >= 4)
+                threshold = self.confluence_threshold
+                is_valid = (score >= threshold and details.get('oi_panic')) if has_oi_data else (score >= threshold - 1)
 
                 if is_valid:
                     # Check Guardrails
@@ -308,9 +310,10 @@ class StrategyEngine:
                     score += 1
                     details['decay_filter'] = True
 
-                # Confluence Logic: Fallback to score >= 4 if OI data is missing (Backtests)
+                # Confluence Logic: Fallback to score >= threshold - 1 if OI data is missing (Backtests)
                 has_oi_data = float(pe_data.get('oi', 0)) > 0 or abs(float(pe_data.get('oi_delta', 0))) > 0
-                is_valid = (score >= 5 and details.get('oi_panic')) if has_oi_data else (score >= 4)
+                threshold = self.confluence_threshold
+                is_valid = (score >= threshold and details.get('oi_panic')) if has_oi_data else (score >= threshold - 1)
 
                 if is_valid:
                     if self.check_guardrails('Bearish', idx_data, ce_data, pe_data, ref_low):
