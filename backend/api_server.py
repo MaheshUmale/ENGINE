@@ -955,6 +955,12 @@ async def get_symmetry_signals():
 @fastapi_app.get("/orderflow")
 async def serve_orderflow(request: Request): return templates.TemplateResponse("orderflow_chart.html", {"request": request})
 
+@fastapi_app.get("/tick")
+async def serve_tick(request: Request): return templates.TemplateResponse("orderflow_chart.html", {"request": request})
+
+@fastapi_app.get("/renko")
+async def serve_renko(request: Request): return templates.TemplateResponse("renko_chart.html", {"request": request})
+
 @fastapi_app.get("/db-viewer")
 async def serve_db(request: Request): return templates.TemplateResponse("db_viewer.html", {"request": request})
 
