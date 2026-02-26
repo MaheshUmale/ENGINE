@@ -140,7 +140,18 @@ class LocalDB:
         logger.info(f"Local DuckDB initialized at {DB_PATH}")
 
     def _migrate_db(self):
-        """Add missing columns to existing tables."""
+        """Add missing columns or remove obsolete columns from existing tables."""
+        # 0. ticks (Storage optimization: remove raw JSON column)
+        try:
+            cols = [c['column_name'] for c in self.get_table_schema('ticks')]
+            if 'full_feed' in cols:
+                logger.info("Migrating: Dropping 'full_feed' column from ticks table")
+                # DuckDB allows dropping columns
+                self.conn.execute("ALTER TABLE ticks DROP COLUMN full_feed")
+                self.conn.execute("CHECKPOINT")
+        except Exception as e:
+            logger.error(f"Error migrating ticks table: {e}")
+
         # 1. options_snapshots
         try:
             cols = [c['column_name'] for c in self.get_table_schema('options_snapshots')]
