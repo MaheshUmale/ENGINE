@@ -140,7 +140,18 @@ class LocalDB:
         logger.info(f"Local DuckDB initialized at {DB_PATH}")
 
     def _migrate_db(self):
-        """Add missing columns to existing tables."""
+        """Add missing columns or remove obsolete columns from existing tables."""
+        # 0. ticks (Storage optimization: remove raw JSON column)
+        try:
+            cols = [c['column_name'] for c in self.get_table_schema('ticks')]
+            if 'full_feed' in cols:
+                logger.info("Migrating: Dropping 'full_feed' column from ticks table")
+                # DuckDB allows dropping columns
+                self.conn.execute("ALTER TABLE ticks DROP COLUMN full_feed")
+                self.conn.execute("CHECKPOINT")
+        except Exception as e:
+            logger.error(f"Error migrating ticks table: {e}")
+
         # 1. options_snapshots
         try:
             cols = [c['column_name'] for c in self.get_table_schema('options_snapshots')]
@@ -183,6 +194,7 @@ class LocalDB:
         Optimized to store only essential fields, reducing storage overhead.
         """
         if not ticks: return
+        cols = ['date', 'instrumentKey', 'ts_ms', 'price', 'qty', 'source']
         data = []
         for t in ticks:
             # Robust type casting using shared utilities
@@ -199,9 +211,13 @@ class LocalDB:
                 'source': t.get('source', 'live')
             })
 
-        df = pd.DataFrame(data)
+        df = pd.DataFrame(data)[cols]
         with self._execute_lock:
-            self.conn.execute("INSERT INTO ticks SELECT * FROM df")
+            # Register the dataframe and use explicit column names for the INSERT
+            self.conn.register('df_ticks', df)
+            self.conn.execute(f"INSERT INTO ticks ({', '.join(cols)}) SELECT * FROM df_ticks")
+            self.conn.unregister('df_ticks')
+
             self._batch_count += 1
             # Periodic checkpoint to ensure data is persisted and WAL is managed
             if self._batch_count >= 50:

@@ -16,6 +16,7 @@ class UpstoxAPIClient:
         self.configuration = upstox_client.Configuration()
         self.configuration.access_token = access_token
         self.api_client = upstox_client.ApiClient(self.configuration)
+        self._tv_volume_cache = {} # Cache for TV volumes to speed up backtests
 
     async def get_hist_candles(self, symbol: str, interval: str, count: int = 5000, from_date: str = None, to_date: str = None) -> List[List]:
         """Fetch historical candles from Upstox with client-side aggregation and intraday merging."""
@@ -109,18 +110,26 @@ class UpstoxAPIClient:
                         logger.error(f"Aggregation failed: {e}")
 
                 # Hybrid Volume for Indices: Fetch from TradingView
+                from config import SNAPSHOT_CONFIG
                 is_index = any(idx in symbol.upper() for idx in ["NIFTY", "BANKNIFTY"])
-                if is_index:
+                if is_index and SNAPSHOT_CONFIG.get('enable_tv_volume_merge', False):
                     try:
-                        from .tv_api import tv_api
-                        # Use a timeout for TV volume to avoid blocking the whole process
-                        tv_candles = await asyncio.wait_for(
-                            asyncio.to_thread(tv_api.get_hist_candles, symbol, interval, max(count, len(formatted)) + 50),
-                            timeout=30.0
-                        )
-                        if tv_candles:
-                            # Map TV candles by timestamp
-                            tv_map = {c[0]: c[5] for c in tv_candles} # ts -> volume
+                        # Use cache to avoid redundant TV requests in backtests
+                        cache_key = f"{symbol}_{interval}"
+                        tv_map = self._tv_volume_cache.get(cache_key)
+
+                        if not tv_map:
+                            from .tv_api import tv_api
+                            # Use a shorter timeout and fewer bars for volume sync
+                            tv_candles = await asyncio.wait_for(
+                                asyncio.to_thread(tv_api.get_hist_candles, symbol, interval, 500),
+                                timeout=15.0
+                            )
+                            if tv_candles:
+                                tv_map = {c[0]: c[5] for c in tv_candles}
+                                self._tv_volume_cache[cache_key] = tv_map
+
+                        if tv_map:
                             for c in formatted:
                                 if c[0] in tv_map:
                                     c[5] = int(tv_map[c[0]])
