@@ -791,12 +791,21 @@ async def run_backtest_api(request: Request):
         bt.params = params
 
         # Run backtest
-        await bt.run_backtest(from_date, to_date)
+        final_df = await bt.run_backtest(from_date, to_date)
 
         # Generate Report from the specific backtest DB
         session = bt.get_backtest_session()
         # Query BUY trades that are CLOSED, as they contain entry_price, exit_price and pnl
         trades = session.query(Trade).filter(Trade.status == 'CLOSED', Trade.side == 'BUY').order_by(Trade.timestamp.asc()).all()
+
+        # Candles for chart
+        candles = []
+        if final_df is not None and not final_df.empty:
+            for _, row in final_df.iterrows():
+                candles.append([
+                    int(row['timestamp'].timestamp()),
+                    row['open_idx'], row['high_idx'], row['low_idx'], row['close_idx']
+                ])
 
         trade_list = []
         equity_data = []
@@ -854,7 +863,8 @@ async def run_backtest_api(request: Request):
                 "max_drawdown": max_dd,
                 "sharpe_ratio": sharpe,
                 "equity_curve": equity_json,
-                "trades": trade_list[::-1] # Latest first for log
+                "trades": trade_list[::-1], # Latest first for log
+                "candles": candles
             }
         }
     except Exception as e:
