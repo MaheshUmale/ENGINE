@@ -6,6 +6,7 @@ import asyncio
 class ExecutionEngine:
     def __init__(self, session_factory=None, initial_balance=1000000, slippage=0.001, commission_rate=0.0005, fixed_charge=20):
         self.get_session = session_factory or get_session
+        self.initial_balance = initial_balance
         self.balance = initial_balance
         self.slippage = slippage # 0.1% default
         self.commission_rate = commission_rate # 0.05%
@@ -14,10 +15,20 @@ class ExecutionEngine:
 
     def recover_positions(self):
         """
-        Recovers open positions from the database on startup.
+        Recovers open positions and current balance from the database on startup.
         """
         session = self.get_session()
         try:
+            # 1. Recover Balance
+            from .database import AppSetting
+            balance_setting = session.query(AppSetting).filter_by(key='paper_balance').first()
+            if balance_setting:
+                self.balance = float(balance_setting.value)
+                print(f"State Recovery: Recovered Paper Balance: ₹{self.balance:.2f}")
+            else:
+                print(f"State Recovery: No saved balance found. Using initial: ₹{self.balance:.2f}")
+
+            # 2. Recover Positions
             open_trades = session.query(Trade).filter_by(status='OPEN').all()
             for trade in open_trades:
                 self.positions[trade.index_name] = {
@@ -31,9 +42,29 @@ class ExecutionEngine:
                 }
 
             if self.positions:
-                print(f"State Recovery: Recovered {len(self.positions)} open positions.")
+                print(f"State Recovery: Successfully reloaded {len(self.positions)} open positions into ExecutionEngine.")
+            else:
+                print("State Recovery: No open positions to recover.")
         except Exception as e:
             print(f"Error recovering positions: {e}")
+        finally:
+            session.close()
+
+    def _save_balance(self):
+        """Internal helper to persist balance to DB."""
+        session = self.get_session()
+        try:
+            from .database import AppSetting
+            balance_setting = session.query(AppSetting).filter_by(key='paper_balance').first()
+            if not balance_setting:
+                balance_setting = AppSetting(key='paper_balance', value=str(self.balance))
+                session.add(balance_setting)
+            else:
+                balance_setting.value = str(self.balance)
+            session.commit()
+        except Exception as e:
+            print(f"Error saving balance: {e}")
+            session.rollback()
         finally:
             session.close()
 
@@ -60,6 +91,7 @@ class ExecutionEngine:
         # Turnover-based commission + fixed charge
         entry_cost = (entry_price * quantity * self.commission_rate) + self.fixed_charge
         self.balance -= entry_cost
+        self._save_balance()
 
         session = self.get_session()
         ts = timestamp if timestamp else (signal.timestamp if signal.timestamp else datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None))
@@ -148,6 +180,7 @@ class ExecutionEngine:
         pnl_net = pnl_gross - exit_cost
 
         self.balance += pnl_net
+        self._save_balance()
 
         exit_trade = Trade(
             timestamp=timestamp if timestamp else datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),

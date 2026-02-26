@@ -38,7 +38,7 @@ This document centralizes all requirements for the ProDesk Trading Terminal, syn
 
 ## 5. Dashboards & Visualization [COMPLETED]
 - [x] **Options Dashboard**: Unified "Cockpit" view with Greeks, OI, and Trend charts.
-- [x] **Symmetry Dashboard**: Modern performance tracking with Sharpe Ratio, Max Drawdown, and Equity Curves.
+- [x] **Integrated Performance Tracking**: Symmetry Bot performance and Portfolio Greeks integrated directly into the Main Terminal sidebar.
 - [x] **Orderflow Chart**: specialized tick-based and renko visualization.
 - [x] **Signal Markers**: Automated marking of buy/sell signals, SL, and TP levels directly on charts.
 - [x] **Alert System**: Threshold-based notifications for Price, OI, and PCR events.

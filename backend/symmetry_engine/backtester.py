@@ -34,19 +34,19 @@ class Backtester:
         self.params = {}
 
     def apply_params(self):
-        """Applies dynamic parameters to engines."""
+        """Applies dynamic parameters to all engines."""
         if not self.params: return
 
-        swing_window = self.params.get('swing_window', 10)
-        # Update StrategyEngine logic to use these params
-        # Since SWING_WINDOW is currently imported from config, we'll need to override it
-        # or update the StrategyEngine to use instance variables.
-
-        # We will dynamically inject these into the strategy instance
-        self.strategy.swing_window = swing_window
-        self.strategy.confluence_threshold = self.params.get('confluence_threshold', 4)
-        self.strategy.atr_multiplier = self.params.get('atr_multiplier', 1.5)
+        swing_window = int(self.params.get('swing_window', 10))
+        confluence_threshold = int(self.params.get('confluence_threshold', 4))
+        atr_multiplier = float(self.params.get('atr_multiplier', 1.5))
         self.enable_index_sync = self.params.get('enable_index_sync', True)
+
+        for engine in self.engines.values():
+            engine.swing_window = swing_window
+            engine.confluence_threshold = confluence_threshold
+            engine.atr_multiplier = atr_multiplier
+            print(f"Applied params to {engine.index_name}: Swing={swing_window}, Threshold={confluence_threshold}, ATR={atr_multiplier}")
 
     def get_backtest_session(self):
         return self.Session()

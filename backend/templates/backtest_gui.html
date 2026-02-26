@@ -25,7 +25,6 @@
         <nav class="flex items-center gap-6">
             <a href="/" class="text-[10px] font-bold text-gray-500 hover:text-white transition-colors uppercase tracking-widest">Terminal</a>
             <a href="/options" class="text-[10px] font-bold text-gray-500 hover:text-white transition-colors uppercase tracking-widest">Options</a>
-            <a href="/symmetry" class="text-[10px] font-bold text-gray-500 hover:text-white transition-colors uppercase tracking-widest">Symmetry</a>
         </nav>
     </header>
 
@@ -231,7 +230,9 @@
                 // Add trade markers
                 const markers = [];
                 report.trades.forEach(t => {
-                    const ts = typeof t.timestamp === 'number' ? t.timestamp : Math.floor(new Date(t.timestamp).getTime() / 1000);
+                    const ts = t.timestamp;
+                    const exitTs = t.exit_timestamp;
+
                     // Entry Marker
                     markers.push({
                         time: ts,
@@ -240,8 +241,15 @@
                         shape: t.instrument.includes('CE') ? 'arrowUp' : 'arrowDown',
                         text: 'ENTRY'
                     });
-                    // Exit Marker (if timestamp is different, but for now we only have one timestamp in report.trades)
-                    // Actually our report.trades has entry timestamp.
+
+                    // Exit Marker
+                    markers.push({
+                        time: exitTs,
+                        position: t.instrument.includes('CE') ? 'aboveBar' : 'belowBar',
+                        color: t.pnl >= 0 ? '#22c55e' : '#ef4444',
+                        shape: 'circle',
+                        text: 'EXIT'
+                    });
                 });
                 mainSeries.setMarkers(markers.sort((a,b) => a.time - b.time));
                 priceChart.timeScale().fitContent();
@@ -250,7 +258,10 @@
             const logBody = document.getElementById('log_body');
             logBody.innerHTML = report.trades.map(t => `
                 <tr class="border-b border-white/5 hover:bg-white/5">
-                    <td class="py-3 text-gray-400 font-mono">${typeof t.timestamp === 'number' ? new Date(t.timestamp * 1000).toLocaleString('en-IN', {timeZone: 'UTC'}) : new Date(t.timestamp).toLocaleString('en-IN')}</td>
+                    <td class="py-3 font-mono">
+                        <div class="text-white">${new Date(t.timestamp * 1000).toLocaleString('en-IN', {timeZone: 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit'})}</div>
+                        <div class="text-[8px] text-gray-500">${new Date(t.exit_timestamp * 1000).toLocaleString('en-IN', {timeZone: 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit'})}</div>
+                    </td>
                     <td class="py-3 font-bold">${t.index}</td>
                     <td class="py-3">
                         <span class="px-2 py-0.5 rounded ${t.instrument.includes('CE') ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'} font-black">
