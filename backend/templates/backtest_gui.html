@@ -231,7 +231,7 @@
                 // Add trade markers
                 const markers = [];
                 report.trades.forEach(t => {
-                    const ts = Math.floor(new Date(t.timestamp).getTime() / 1000);
+                    const ts = typeof t.timestamp === 'number' ? t.timestamp : Math.floor(new Date(t.timestamp).getTime() / 1000);
                     // Entry Marker
                     markers.push({
                         time: ts,
@@ -250,7 +250,7 @@
             const logBody = document.getElementById('log_body');
             logBody.innerHTML = report.trades.map(t => `
                 <tr class="border-b border-white/5 hover:bg-white/5">
-                    <td class="py-3 text-gray-400 font-mono">${new Date(t.timestamp).toLocaleString('en-IN')}</td>
+                    <td class="py-3 text-gray-400 font-mono">${typeof t.timestamp === 'number' ? new Date(t.timestamp * 1000).toLocaleString('en-IN', {timeZone: 'UTC'}) : new Date(t.timestamp).toLocaleString('en-IN')}</td>
                     <td class="py-3 font-bold">${t.index}</td>
                     <td class="py-3">
                         <span class="px-2 py-0.5 rounded ${t.instrument.includes('CE') ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'} font-black">
