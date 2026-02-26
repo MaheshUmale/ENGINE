@@ -288,7 +288,7 @@ class Backtester:
                         if enable_sync:
                             other_sync = True
                             for other_name, other_engine in self.engines.items():
-                                if other_name == self.index_name: continue
+                                if other_name == index_name: continue
                                 if not other_engine.get_trend_state(signal.side):
                                     other_sync = False
                                     break
@@ -300,12 +300,12 @@ class Backtester:
                             # Risk Check
                             can_trade, _ = self.risk_manager.can_trade(len(self.execution.positions), timestamp=current_time)
                             if can_trade:
-                                self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx'])
-
-                        session = self.get_backtest_session()
-                        session.add(signal)
-                        session.commit()
-                        session.close()
+                                if self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx']):
+                                    # ONLY SAVE SIGNAL IF WE ACTUALLY TRADED
+                                    session = self.get_backtest_session()
+                                    session.add(signal)
+                                    session.commit()
+                                    session.close()
 
                 # Exits
                 if not is_warmup and self.index_name in self.execution.positions:

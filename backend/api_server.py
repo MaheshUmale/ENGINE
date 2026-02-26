@@ -800,11 +800,14 @@ async def run_backtest_api(request: Request):
 
         # Candles for chart
         candles = []
+        import datetime
         if final_df is not None and not final_df.empty:
             for _, row in final_df.iterrows():
+                # Naive IST timestamps from backtester are treated as UTC for epoch calculation
+                # to ensure they align with the numeric display on the chart.
+                ts = int(row['timestamp'].replace(tzinfo=datetime.timezone.utc).timestamp())
                 candles.append([
-                    int(row['timestamp'].timestamp()),
-                    row['open_idx'], row['high_idx'], row['low_idx'], row['close_idx']
+                    ts, row['open_idx'], row['high_idx'], row['low_idx'], row['close_idx']
                 ])
 
         trade_list = []
@@ -813,8 +816,10 @@ async def run_backtest_api(request: Request):
 
         for t in trades:
             cum_pnl += t.pnl
+            # Naive IST timestamps from backtester are treated as UTC for epoch calculation
+            ts_epoch = int(t.timestamp.replace(tzinfo=datetime.timezone.utc).timestamp())
             trade_list.append({
-                "timestamp": t.timestamp.isoformat(),
+                "timestamp": ts_epoch,
                 "index": t.index_name,
                 "instrument": t.instrument_key,
                 "price": t.price, # Used as entry price in GUI
