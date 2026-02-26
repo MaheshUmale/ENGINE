@@ -25,3 +25,11 @@ def safe_int(val, default=0):
         return int(val)
     except (ValueError, TypeError):
         return default
+
+def sanitize_float(val, default=0.0):
+    """Ensure a float is JSON-compliant (no inf or nan)."""
+    import math
+    f_val = safe_float(val, default)
+    if math.isinf(f_val) or math.isnan(f_val):
+        return default
+    return f_val

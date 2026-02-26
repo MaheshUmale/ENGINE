@@ -85,7 +85,7 @@ class GreeksCalculator:
                     S, K, T, r, option_price, option_type
                 )
 
-            return {
+            result = {
                 'delta': round(delta, 4),
                 'gamma': round(gamma, 6),
                 'theta': round(theta, 4),
@@ -97,6 +97,13 @@ class GreeksCalculator:
                 'intrinsic_value': self._calculate_intrinsic_value(S, K, option_type),
                 'time_value': self._calculate_time_value(S, K, T, r, sigma, option_price, option_type) if option_price else 0
             }
+
+            # Final safety check for JSON-incompatible values
+            for key, val in result.items():
+                if isinstance(val, (int, float)) and (math.isinf(val) or math.isnan(val)):
+                    result[key] = 0.0
+
+            return result
 
         except Exception as e:
             logger.error(f"Error calculating Greeks: {e}")
@@ -143,10 +150,18 @@ class GreeksCalculator:
             if abs(price - market_price) < precision:
                 return sigma
 
-            if vega > 0:
-                sigma = sigma - (price - market_price) / vega
+            if vega > 1e-6:
+                diff = (price - market_price) / vega
+                # Prevent extreme jumps that cause divergence
+                if abs(diff) > 0.5:
+                    diff = 0.5 if diff > 0 else -0.5
+                sigma = sigma - diff
             else:
-                break
+                # If vega is too small, shift sigma slightly to try another area
+                sigma = sigma + 0.1 if (price or 0) < market_price else sigma - 0.1
+
+            # Clamp sigma to a realistic range [0.1%, 1000%]
+            sigma = max(0.001, min(sigma, 10.0))
 
         return sigma
 
