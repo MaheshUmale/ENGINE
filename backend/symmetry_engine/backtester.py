@@ -197,10 +197,18 @@ class Backtester:
                 }).ffill()
                 other_5m[name].index = other_5m[name].index.tz_localize(None)
 
+            last_signal_min = None
             for i in range(50, len(combined)):
                 subset = combined.iloc[:i]
                 current = combined.iloc[i]
                 current_time = current['timestamp']
+
+                # Market Hour Filter (IST: 09:17 to 15:27)
+                is_trade_window = (current_time.hour == 9 and current_time.minute >= 17) or \
+                                 (current_time.hour > 9 and current_time.hour < 15) or \
+                                 (current_time.hour == 15 and current_time.minute < 27)
+
+                is_eod = (current_time.hour == 15 and current_time.minute >= 27) or (current_time.hour > 15)
 
                 # Dynamic ATM Selection
                 current_idx_price = current['close_idx']
@@ -279,11 +287,16 @@ class Backtester:
                         ce_key, pe_key, timestamp=current_time
                     )
 
-                # Signals (Only if not warmup)
-                if not is_warmup:
+                # Signals (Only if not warmup and within trade window)
+                if not is_warmup and is_trade_window:
                     # Inject params into generate_signals if needed or use modified StrategyEngine
                     signal = self.strategy.generate_signals(details)
                     if signal:
+                        # Prevent multiple entries on the same bar
+                        current_min = current_time.replace(second=0, microsecond=0)
+                        if last_signal_min == current_min:
+                            continue
+
                         # Enhancement: Multi-Index Sync Check
                         if enable_sync:
                             other_sync = True
@@ -302,6 +315,7 @@ class Backtester:
                             if can_trade:
                                 if self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx']):
                                     self.strategy.reset_trailing_sl()
+                                    last_signal_min = current_min
                                     # ONLY SAVE SIGNAL IF WE ACTUALLY TRADED
                                     session = self.get_backtest_session()
                                     session.add(signal)
@@ -311,6 +325,10 @@ class Backtester:
                 # Exits
                 if not is_warmup and self.index_name in self.execution.positions:
                     pos = self.execution.positions[self.index_name]
+
+                    # Force EOD Close
+                    force_close = is_eod
+
                     # Use the entry strike's data for exit, even if ATM shifted
                     entry_ce_key = pos['ce_key']
                     entry_pe_key = pos['pe_key']
@@ -326,7 +344,7 @@ class Backtester:
                                'oi_delta': current.get(f'oi_{entry_pe_key}', 0) - prev_oi_pe}
 
                     from types import SimpleNamespace
-                    if self.strategy.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data):
+                    if force_close or self.strategy.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data):
                         exit_price = ce_data['ltp'] if pos['side'] == 'BUY_CE' else pe_data['ltp']
 
                         if exit_price > 0:

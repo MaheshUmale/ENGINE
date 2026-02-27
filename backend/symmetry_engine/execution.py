@@ -103,9 +103,11 @@ class ExecutionEngine:
             instrument_pe=signal.details.get('pe_key'),
             side='BUY',
             price=entry_price,
-            index_price=index_price if index_price else signal.index_price,
+            index_price=index_price if index_price is not None else signal.index_price,
             quantity=quantity,
             status='OPEN',
+            pnl=0.0,
+            exit_price=0.0,
             trailing_sl=0.0
         )
         session.add(trade)
@@ -186,12 +188,16 @@ class ExecutionEngine:
             timestamp=timestamp if timestamp else datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
             index_name=index_name,
             instrument_key=pos['side'],
+            instrument_ce=pos.get('ce_key'),
+            instrument_pe=pos.get('pe_key'),
             side='SELL',
             price=exit_price,
-            index_price=index_price,
+            index_price=index_price if index_price is not None else 0.0,
             quantity=pos['quantity'],
             status='CLOSED',
-            pnl=pnl_net
+            pnl=pnl_net,
+            exit_price=exit_price,
+            trailing_sl=pos.get('trailing_sl', 0.0)
         )
 
         trade.status = 'CLOSED'
