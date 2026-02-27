@@ -174,8 +174,21 @@ class LocalDB:
         except Exception as e:
             logger.error(f"Error migrating options_snapshots: {e}")
 
-        # 2. pcr_history
+        # 2. options_snapshots (Remove unused Greeks/Calculations)
         try:
+            cols = [c['column_name'] for c in self.get_table_schema('options_snapshots')]
+            for col in ['intrinsic_value', 'time_value']:
+                if col in cols:
+                    logger.info(f"Migrating: Dropping '{col}' from options_snapshots table")
+                    # Handle dependencies (like indexes) by dropping them first
+                    self.conn.execute("DROP INDEX IF EXISTS idx_opt_snap_ts")
+                    self.conn.execute(f"ALTER TABLE options_snapshots DROP COLUMN {col}")
+                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_opt_snap_ts ON options_snapshots (timestamp, underlying)")
+                    self.conn.execute("CHECKPOINT")
+        except Exception as e:
+            logger.error(f"Error migrating options_snapshots table: {e}")
+
+        # 3. pcr_history
             cols = [c['column_name'] for c in self.get_table_schema('pcr_history')]
             missing_pcr_cols = {
                 'pcr_oi_change': 'DOUBLE',
@@ -304,7 +317,7 @@ class LocalDB:
         cols = [
             'timestamp', 'underlying', 'symbol', 'expiry', 'strike', 'option_type',
             'oi', 'oi_change', 'volume', 'ltp', 'iv', 'delta', 'gamma', 'theta',
-            'vega', 'intrinsic_value', 'time_value', 'source'
+            'vega', 'source'
         ]
         # Ensure all columns exist in data and have correct types
         for item in data:

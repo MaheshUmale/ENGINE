@@ -37,7 +37,7 @@ A minimal, high-performance trading terminal featuring TradingView charting, rea
   - **Options Discovery**: Automatically merges results from the TradingView Options Scanner.
   - **Technical Search**: Search using exact technical strings (e.g., `NIFTY260210C25600`) for precise contract selection.
 - **Confluence Visuals**:
-  - **OI Profile Overlay**: Toggleable vertical histogram directly on the chart showing Call vs Put Open Interest across all strikes.
+  - **OI Profile Overlay**: Toggleable vertical histogram directly on the chart showing Call vs Put Open Interest across all strikes. Uses a high-performance Canvas-based 'Base + Delta' visualization.
   - **Analysis Center Sidebar**: Integrated panel showing OiGenie predictions (institutional control), OI Buildup Pulse, and real-time Scalper metrics.
   - **Synchronized Replay**: Historical replay mode now fully synchronizes with historical OI and PCR data, simulating the exact market state for strategy refinement.
 - **Triple-Stream Symmetry & Panic Strategy**:
@@ -46,7 +46,7 @@ A minimal, high-performance trading terminal featuring TradingView charting, rea
   - **Panic Filter**: Real-time OI Delta tracking to detect seller unwinding (short covering).
   - **Decay Divergence**: Detects bullish momentum by identifying option prices that resist theta decay.
   - **Automated Visualization**: Direct marking of BUY_CE/BUY_PE signals on the chart with dynamic SL and TP price lines.
-- **Efficient Backend**: Built with FastAPI and DuckDB for low-latency data handling and persistence.
+- **Efficient Backend**: Built with FastAPI and DuckDB for low-latency data handling and persistence. Uses an optimized columnar schema (dropped redundant JSON and Greeks) and multi-room Socket.IO emission to minimize CPU/Network overhead.
 - **Advanced Backtest Engine (GUI)**:
   - Accessible at `/backtest`.
   - Modern Plotly-powered interface for parameter tuning (Swing window, ATR multiplier).

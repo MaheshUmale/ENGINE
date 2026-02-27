@@ -60,18 +60,39 @@ def set_socketio(sio, loop=None):
     main_event_loop = loop
 
 def emit_event(event: str, data: Any, room: Optional[str] = None, hrn: Optional[str] = None):
+    """
+    Emits an event to a specific Socket.IO room.
+    Optimized to only process and log if the room has active subscribers.
+    """
     global socketio_instance, main_event_loop
     if not socketio_instance: return
+
+    # Optimization: If room is provided, check if it has active subscribers before heavy JSON serialization
+    if room:
+        room_key = room.upper()
+        # Find if any interval for this instrument has subscribers
+        has_subscribers = False
+        for (ik, interval), sids in room_subscribers.items():
+            if ik == room_key and len(sids) > 0:
+                has_subscribers = True
+                break
+
+        # Also check for exact room matches (some rooms might not be in room_subscribers dict if they are global)
+        if not has_subscribers and room_key not in ["GLOBAL", "ALERTS"]:
+            # If no one is listening to this specific instrument room, skip emission to save CPU/Network
+            return
+
     if isinstance(data, (dict, list)):
         data = json.loads(json.dumps(data, cls=LocalDBJSONEncoder))
     try:
         if main_event_loop and main_event_loop.is_running():
             asyncio.run_coroutine_threadsafe(socketio_instance.emit(event, data, to=room), main_event_loop)
             if room:
+                # Reduced log noise: only log if it's a primary instrument or has subscribers
                 log_msg = f"Emitted {event} to room {room}"
                 if hrn and hrn.upper() != room:
                     log_msg += f" ({hrn})"
-                logger.info(log_msg)
+                logger.debug(log_msg) # Changed to debug to keep console clean
     except Exception as e:
         logger.error(f"Emit Error: {e}")
 
@@ -140,6 +161,8 @@ def on_message(message: Union[Dict, str]):
         feeds_map = {}
 
         # Handle Chart/OHLCV Updates - Indices often update primarily here
+        # This block extracts real-time OHLC data and converts it into synthetic ticks
+        # if the standard tick feed is delayed or unavailable for the instrument.
         if data.get('type') == 'chart_update':
             instrument_key = data.get('instrumentKey')
             interval = str(data.get('interval', '1'))
@@ -149,7 +172,11 @@ def on_message(message: Union[Dict, str]):
                     payload['instrumentKey'] = instrument_key
                     payload['interval'] = interval
 
-                # Use multiple room identifiers for better compatibility and debuggability
+                # Multi-Room Emission System:
+                # We emit to three different rooms to support various frontend components:
+                # 1. Technical Key (e.g., NSE_INDEX|NIFTY 50) - used by low-level providers.
+                # 2. Canonical Key (e.g., NSE:NIFTY) - used by the Main Terminal/Strategy.
+                # 3. HRN (e.g., NIFTY) - used by the Options Dashboard for simplicity.
                 hrn = symbol_mapper.get_hrn(instrument_key)
                 internal_key = symbol_mapper.from_upstox_key(instrument_key)
 

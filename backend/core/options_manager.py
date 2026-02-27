@@ -694,8 +694,6 @@ class OptionsManager:
                 'gamma': call_greeks['gamma'],
                 'theta': call_greeks['theta'],
                 'vega': call_greeks['vega'],
-                'intrinsic_value': call_greeks['intrinsic_value'],
-                'time_value': call_greeks['time_value'],
                 'source': name
             })
 
@@ -727,8 +725,6 @@ class OptionsManager:
                 'gamma': put_greeks['gamma'],
                 'theta': put_greeks['theta'],
                 'vega': put_greeks['vega'],
-                'intrinsic_value': put_greeks['intrinsic_value'],
-                'time_value': put_greeks['time_value'],
                 'source': name
             })
 
@@ -855,8 +851,6 @@ class OptionsManager:
                     'gamma': greeks['gamma'],
                     'theta': greeks['theta'],
                     'vega': greeks['vega'],
-                    'intrinsic_value': greeks.get('intrinsic_value', 0),
-                    'time_value': greeks.get('time_value', 0),
                     'source': 'tradingview_fallback'
                 })
             except Exception as e:
