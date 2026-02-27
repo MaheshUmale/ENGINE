@@ -288,7 +288,7 @@ class Backtester:
                         if enable_sync:
                             other_sync = True
                             for other_name, other_engine in self.engines.items():
-                                if other_name == index_name: continue
+                                if other_name == self.index_name: continue
                                 if not other_engine.get_trend_state(signal.side):
                                     other_sync = False
                                     break
