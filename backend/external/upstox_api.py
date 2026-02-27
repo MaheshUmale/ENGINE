@@ -120,20 +120,23 @@ class UpstoxAPIClient:
 
                         if not tv_map:
                             from .tv_api import tv_api
-                            # Use a shorter timeout and fewer bars for volume sync
+                            # Match requested count for full volume synchronization
                             tv_candles = await asyncio.wait_for(
-                                asyncio.to_thread(tv_api.get_hist_candles, symbol, interval, 500),
-                                timeout=15.0
+                                asyncio.to_thread(tv_api.get_hist_candles, symbol, interval, count),
+                                timeout=30.0
                             )
                             if tv_candles:
                                 tv_map = {c[0]: c[5] for c in tv_candles}
                                 self._tv_volume_cache[cache_key] = tv_map
 
                         if tv_map:
+                            count_merged = 0
                             for c in formatted:
                                 if c[0] in tv_map:
-                                    c[5] = int(tv_map[c[0]])
-                            logger.info(f"Merged TradingView volume for index {symbol}")
+                                    # Use safe_float/int for consistent scaling
+                                    c[5] = int(float(tv_map[c[0]]))
+                                    count_merged += 1
+                            logger.info(f"Merged TradingView volume for index {symbol} ({count_merged}/{len(formatted)} candles matched)")
                     except Exception as e:
                         logger.error(f"Failed to merge TradingView volume: {e}")
 

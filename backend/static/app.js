@@ -170,6 +170,7 @@ class ChartInstance {
             lastValueVisible: false,
             priceLineVisible: false
         });
+        // Occupy more vertical space for volume (30% instead of 20%)
         this.chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.7, bottom: 0 }, visible: false });
 
         this.container.addEventListener('mousedown', () => this.engine.setActiveChart(this.index));
@@ -299,7 +300,8 @@ class ChartInstance {
 
         const volumes = candles.map(c => ({
             time: c.time, value: c.volume,
-            color: c.close >= c.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)'
+            // Use slightly higher opacity for volume bars
+            color: c.close >= c.open ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)'
         }));
         this.volumeSeries.setData(volumes);
     }
@@ -361,7 +363,7 @@ class ChartInstance {
         }
         this.volumeSeries.update({
             time: this.lastCandle.time, value: this.lastCandle.volume,
-            color: this.lastCandle.close >= this.lastCandle.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)'
+            color: this.lastCandle.close >= this.lastCandle.open ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)'
         });
         if (this.activeSymmetrySignal) this.updateSymmetryPnL();
     }
@@ -393,7 +395,7 @@ class ChartInstance {
                         this.mainSeries.update(coloredUpdate);
                         this.volumeSeries.update({
                             time: c.time, value: c.volume,
-                            color: c.close >= c.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)'
+                            color: c.close >= c.open ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)'
                         });
                         if (this.activeSymmetrySignal) this.updateSymmetryPnL();
                         this.lastCandleTime = c.time;
@@ -921,7 +923,7 @@ class ReplayController {
 
             const volumes = slice.map(c => ({
                 time: Number(c.time), value: c.volume,
-                color: c.close >= c.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)'
+                color: c.close >= c.open ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)'
             }));
             chart.volumeSeries.setData(volumes);
 

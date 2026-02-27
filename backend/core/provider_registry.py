@@ -49,8 +49,15 @@ live_stream_registry = ProviderRegistry(ILiveStreamProvider)
 options_data_registry = ProviderRegistry(IOptionsDataProvider)
 historical_data_registry = ProviderRegistry(IHistoricalDataProvider)
 
+_initialized = False
+
 def initialize_default_providers():
     """Seed the registries with existing implementations."""
+    global _initialized
+    if _initialized:
+        return
+    _initialized = True
+
     from config import UPSTOX_ACCESS_TOKEN
     from external.providers import (
         TradingViewLiveStreamProvider,

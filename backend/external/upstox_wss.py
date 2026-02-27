@@ -19,7 +19,9 @@ class UpstoxWSS:
         self.subscribed_keys = set()
 
     def start(self):
-        if self.is_running: return
+        if self.is_running:
+            logger.info("Upstox WSS Streamer already running")
+            return
         try:
             configuration = upstox_client.Configuration()
             configuration.access_token = UPSTOX_ACCESS_TOKEN
