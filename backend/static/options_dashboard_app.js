@@ -21,7 +21,7 @@ class OptionsDashboardManager {
         if (window.Chart) {
             Chart.defaults.font.family = "'Plus Jakarta Sans', sans-serif";
             Chart.defaults.color = '#94a3b8';
-            Chart.defaults.font.size = 7;
+            Chart.defaults.font.size = 8;
         }
 
         this.init();

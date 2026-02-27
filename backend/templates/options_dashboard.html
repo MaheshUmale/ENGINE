@@ -39,8 +39,8 @@
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
 
-        .mini-card { padding: 0.5rem 0.5rem 0.125rem 0.5rem; border-radius: 0.75rem; }
-        .mini-chart-container { height: 120px; position: relative; margin-bottom: -0.125rem; }
+        .mini-card { padding: 0.3rem 0.3rem 0.1rem 0.3rem; border-radius: 0.5rem; }
+        .mini-chart-container { height: 160px; position: relative; margin-bottom: -0.125rem; }
         .mini-text { font-size: 8px; line-height: 1; }
         .mini-header { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.025em; margin-bottom: 0.25rem; color: var(--text-muted); }
 
@@ -89,51 +89,52 @@
                     </div>
 
                     <!-- Genie Card -->
-                    <div class="glass-panel mini-card border-l-2 border-blue-500 flex flex-col gap-1 shrink-0">
-                        <div class="flex justify-between items-start">
-                            <div class="mini-text text-blue-500 font-black uppercase">OiGenie Control</div>
+                    <div class="glass-panel mini-card border-l-2 border-blue-500 flex flex-col gap-0.5 shrink-0">
+                        <div class="flex justify-between items-center">
+                            <div class="flex items-center gap-2">
+                                <div class="mini-text text-blue-500 font-black uppercase">Genie</div>
+                                <div id="${idPrefix}_genieControl" class="text-[10px] font-black text-white uppercase">-</div>
+                            </div>
                             <div id="${idPrefix}_genieRange" class="mini-text text-blue-400 font-bold">-</div>
                         </div>
-                        <div class="flex items-center justify-between">
-                            <div id="${idPrefix}_genieControl" class="text-xs font-black text-white uppercase">-</div>
-                            <div id="${idPrefix}_genieDistribution" class="mini-text text-gray-500 uppercase">-</div>
-                            <div class="text-right">
-                                <span class="mini-text text-gray-500 uppercase font-bold">Max Pain</span>
-                                <span id="${idPrefix}_maxPain" class="mini-text text-purple-500 font-black ml-1">-</span>
+
+                        <div class="flex items-center justify-between gap-4 py-0.5 border-y border-white/5">
+                             <div class="flex items-center gap-2 flex-1">
+                                <span class="mini-text text-gray-500 uppercase font-bold">PCR</span>
+                                <span id="${idPrefix}_currentPcrValue" class="mini-text font-black text-blue-500">-</span>
+                                <div class="flex-1 h-3">
+                                    <canvas id="${idPrefix}_pcrTrendChart"></canvas>
+                                </div>
                             </div>
-                        </div>
-                        <!-- PCR Trend Mini -->
-                        <div class="flex items-center gap-2 mt-1">
-                            <span class="mini-text text-gray-500 uppercase font-bold">PCR</span>
-                            <span id="${idPrefix}_currentPcrValue" class="mini-text font-black text-blue-500">-</span>
-                            <div class="flex-1 h-4">
-                                <canvas id="${idPrefix}_pcrTrendChart"></canvas>
+                            <div class="text-right shrink-0">
+                                <span class="mini-text text-gray-500 uppercase font-bold">Pain</span>
+                                <span id="${idPrefix}_maxPain" class="mini-text text-purple-500 font-black ml-1">-</span>
                             </div>
                         </div>
 
                         <!-- Greeks & IV Section -->
-                        <div class="grid grid-cols-4 gap-2 mt-1 pt-1 border-t border-white/5">
+                        <div class="grid grid-cols-4 gap-2 pt-0.5">
                             <div class="flex flex-col">
-                                <span class="mini-text text-gray-500 uppercase font-bold">IV Rank</span>
+                                <span class="mini-text text-gray-400 font-bold uppercase">IVR</span>
                                 <span id="${idPrefix}_ivRank" class="mini-text text-blue-400 font-black">-</span>
                             </div>
                             <div class="flex flex-col">
-                                <span class="mini-text text-gray-500 uppercase font-bold">IV %</span>
+                                <span class="mini-text text-gray-400 font-bold uppercase">IV%</span>
                                 <span id="${idPrefix}_ivPercentile" class="mini-text text-blue-400 font-black">-</span>
                             </div>
                             <div class="flex flex-col">
-                                <span class="mini-text text-gray-500 uppercase font-bold">Net Δ</span>
+                                <span class="mini-text text-gray-400 font-bold uppercase">Net Δ</span>
                                 <span id="${idPrefix}_netDelta" class="mini-text text-white font-black">-</span>
                             </div>
                             <div class="flex flex-col">
-                                <span class="mini-text text-gray-500 uppercase font-bold">Net θ</span>
+                                <span class="mini-text text-gray-400 font-bold uppercase">Net θ</span>
                                 <span id="${idPrefix}_netTheta" class="mini-text text-white font-black">-</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- Charts Grid -->
-                    <div class="flex-1 grid grid-cols-1 gap-2 overflow-y-auto custom-scrollbar pr-1">
+                    <div class="flex-1 grid grid-cols-1 gap-2 overflow-y-auto custom-scrollbar pr-1 content-start">
                         <!-- 1. Flow -->
                         <div class="glass-panel mini-card flex flex-col">
                             <div class="mini-header">CE vs PE OI Flow</div>

@@ -9,6 +9,19 @@ from config import (
 )
 
 class StrategyEngine:
+    """
+    Core engine for the 'Symmetry Panic' strategy.
+
+    This engine implements a multi-stream analysis (Index + Call Option + Put Option)
+    to identify high-probability scalping opportunities based on market structural
+    failures and rapid shifts in Open Interest (OI).
+
+    The strategy consists of 4 main phases:
+    1. Structural Identification: Finding a 'Wall' (Swing High/Low).
+    2. Decay Filter: Detecting divergence between Option price and Index price.
+    3. Confluence Trigger: The Triple-Stream Symmetry and OI Panic verification.
+    4. Guardrails: Protecting against traps and liquidity gaps.
+    """
     def __init__(self, index_name, session_factory=None):
         self.index_name = index_name
         self.get_session = session_factory or get_session
