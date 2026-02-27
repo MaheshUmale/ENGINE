@@ -169,7 +169,7 @@ MARKET_HOURS = {
 SNAPSHOT_CONFIG = {
     "interval_seconds": 180,  # 3 minutes between snapshots
     "backfill_interval_minutes": 5,  # 5-minute intervals for backfill
-    "enable_tv_volume_merge": False  # Set to True to merge TradingView volume for indices
+    "enable_tv_volume_merge": True  # Set to True to merge TradingView volume for indices
 }
 
 # Feature Flags
