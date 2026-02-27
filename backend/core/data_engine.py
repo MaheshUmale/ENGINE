@@ -59,7 +59,7 @@ def set_socketio(sio, loop=None):
     socketio_instance = sio
     main_event_loop = loop
 
-def emit_event(event: str, data: Any, room: Optional[str] = None):
+def emit_event(event: str, data: Any, room: Optional[str] = None, hrn: Optional[str] = None):
     global socketio_instance, main_event_loop
     if not socketio_instance: return
     if isinstance(data, (dict, list)):
@@ -68,7 +68,10 @@ def emit_event(event: str, data: Any, room: Optional[str] = None):
         if main_event_loop and main_event_loop.is_running():
             asyncio.run_coroutine_threadsafe(socketio_instance.emit(event, data, to=room), main_event_loop)
             if room:
-                logger.info(f"Emitted {event} to room {room}")
+                log_msg = f"Emitted {event} to room {room}"
+                if hrn and hrn.upper() != room:
+                    log_msg += f" ({hrn})"
+                logger.info(log_msg)
     except Exception as e:
         logger.error(f"Emit Error: {e}")
 
@@ -146,8 +149,20 @@ def on_message(message: Union[Dict, str]):
                     payload['instrumentKey'] = instrument_key
                     payload['interval'] = interval
 
-                # Use full technical symbol as room name
-                emit_event('chart_update', payload, room=instrument_key.upper())
+                # Use multiple room identifiers for better compatibility and debuggability
+                hrn = symbol_mapper.get_hrn(instrument_key)
+                internal_key = symbol_mapper.from_upstox_key(instrument_key)
+
+                # 1. Technical Room
+                emit_event('chart_update', payload, room=instrument_key.upper(), hrn=hrn)
+
+                # 2. Canonical Room (e.g. NSE:NIFTY)
+                if internal_key != instrument_key:
+                    emit_event('chart_update', payload, room=internal_key.upper(), hrn=hrn)
+
+                # 3. HRN Room (Human Readable Name)
+                if hrn and hrn != instrument_key and hrn != internal_key:
+                    emit_event('chart_update', payload, room=hrn.upper(), hrn=hrn)
 
                 # Synthetic Tick Generation for indices from chart updates
                 # Only generate ticks from the most granular (primary) interval to avoid double-counting
@@ -258,14 +273,20 @@ def on_message(message: Union[Dict, str]):
         now = time.time()
         if now - last_emit_times.get('GLOBAL_TICK', 0) > 0.05:
             for inst_key, feed in sym_feeds.items():
-                # Emit to the provider-specific room
-                emit_event('raw_tick', {inst_key: feed}, room=inst_key.upper())
-
-                # ALSO emit to the internal canonical symbol room (e.g. NSE:NIFTY)
-                # so that UI components subscribed to common names receive the data
+                hrn = symbol_mapper.get_hrn(inst_key)
                 internal_key = symbol_mapper.from_upstox_key(inst_key)
+
+                # 1. Emit to provider-specific room (Technical Key)
+                emit_event('raw_tick', {inst_key: feed}, room=inst_key.upper(), hrn=hrn)
+
+                # 2. Emit to internal canonical room (e.g. NSE:NIFTY)
                 if internal_key != inst_key:
-                    emit_event('raw_tick', {internal_key: feed}, room=internal_key.upper())
+                    emit_event('raw_tick', {internal_key: feed}, room=internal_key.upper(), hrn=hrn)
+
+                # 3. Emit to HRN-based room (Human Readable Name)
+                if hrn and hrn != inst_key and hrn != internal_key:
+                    emit_event('raw_tick', {hrn: feed}, room=hrn.upper(), hrn=hrn)
+
             last_emit_times['GLOBAL_TICK'] = now
 
         with buffer_lock:
@@ -285,6 +306,14 @@ def on_message(message: Union[Dict, str]):
 
 def subscribe_instrument(instrument_key: str, sid: str, interval: str = "1"):
     instrument_key = instrument_key.upper()
+
+    # If the key is an HRN, resolve it to the technical key for the provider
+    if '|' not in instrument_key and ':' not in instrument_key:
+        resolved = symbol_mapper.resolve_to_key(instrument_key)
+        if resolved:
+            logger.info(f"Resolved HRN {instrument_key} to technical key {resolved}")
+            instrument_key = resolved.upper()
+
     key = (instrument_key, str(interval))
     if key not in room_subscribers:
         room_subscribers[key] = set()
@@ -309,6 +338,13 @@ def is_sid_using_instrument(sid: str, instrument_key: str) -> bool:
 
 def unsubscribe_instrument(instrument_key: str, sid: str, interval: str = "1"):
     instrument_key = instrument_key.upper()
+
+    # Same resolution logic for unsubscription consistency
+    if '|' not in instrument_key and ':' not in instrument_key:
+        resolved = symbol_mapper.resolve_to_key(instrument_key)
+        if resolved:
+            instrument_key = resolved.upper()
+
     key = (instrument_key, str(interval))
     if key in room_subscribers and sid in room_subscribers[key]:
         room_subscribers[key].remove(sid)
