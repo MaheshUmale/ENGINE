@@ -86,7 +86,7 @@
         <!-- Results Display -->
         <section class="flex-1 flex flex-col gap-6 overflow-hidden">
             <!-- KPIs -->
-            <div id="kpiGrid" class="grid grid-cols-5 gap-4">
+            <div id="kpiGrid" class="grid grid-cols-6 gap-4">
                 <div class="glass-panel rounded-2xl p-4">
                     <div class="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Total PnL</div>
                     <div id="stat_pnl" class="text-xl font-black text-white">₹0.00</div>
@@ -106,6 +106,10 @@
                 <div class="glass-panel rounded-2xl p-4">
                     <div class="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Sharpe Ratio</div>
                     <div id="stat_sharpe" class="text-xl font-black text-blue-400">0.00</div>
+                </div>
+                <div class="glass-panel rounded-2xl p-4">
+                    <div class="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Run ID</div>
+                    <div id="stat_runid" class="text-[10px] font-black text-gray-400 truncate mt-2">None</div>
                 </div>
             </div>
 
@@ -208,6 +212,8 @@
             document.getElementById('stat_trades').innerText = report.trade_count;
             document.getElementById('stat_dd').innerText = `₹${report.max_drawdown.toFixed(2)}`;
             document.getElementById('stat_sharpe').innerText = report.sharpe_ratio.toFixed(2);
+            document.getElementById('stat_runid').innerText = report.db_path ? report.db_path.split('_').pop().replace('.db', '') : 'None';
+            document.getElementById('stat_runid').title = report.db_path || '';
 
             if (report.equity_curve) {
                 Plotly.newPlot('equity_chart', JSON.parse(report.equity_curve).data, {

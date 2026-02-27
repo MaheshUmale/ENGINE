@@ -866,8 +866,8 @@ async def run_backtest_api(request: Request):
 
         session.close()
 
-        # Cleanup temporary DB (optional, maybe keep it for a while)
-        # os.remove(bt_db)
+        # Persistence: Keep the SQLite DB so user can revisit it
+        # We can return the db path in the response so the frontend knows which DB to query for detailed analysis if needed.
 
         return {
             "status": "success",
@@ -879,7 +879,8 @@ async def run_backtest_api(request: Request):
                 "sharpe_ratio": sharpe,
                 "equity_curve": equity_json,
                 "trades": trade_list[::-1], # Latest first for log
-                "candles": candles
+                "candles": candles,
+                "db_path": bt_db
             }
         }
     except Exception as e:
