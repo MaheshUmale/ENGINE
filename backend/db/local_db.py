@@ -146,8 +146,11 @@ class LocalDB:
             cols = [c['column_name'] for c in self.get_table_schema('ticks')]
             if 'full_feed' in cols:
                 logger.info("Migrating: Dropping 'full_feed' column from ticks table")
-                # DuckDB allows dropping columns
+                # Handle dependencies by dropping index first
+                self.conn.execute("DROP INDEX IF EXISTS idx_ticks_date_key_ts")
                 self.conn.execute("ALTER TABLE ticks DROP COLUMN full_feed")
+                # Re-create index after dropping column
+                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_ticks_date_key_ts ON ticks (date, instrumentKey, ts_ms)")
                 self.conn.execute("CHECKPOINT")
         except Exception as e:
             logger.error(f"Error migrating ticks table: {e}")
@@ -359,6 +362,8 @@ class LocalDB:
             try:
                 logger.info("Repartitioning ticks table by date...")
                 self.conn.execute("CREATE TABLE IF NOT EXISTS ticks_temp AS SELECT * FROM ticks ORDER BY date, instrumentKey, ts_ms")
+                # Drop index before dropping table to avoid dependency errors
+                self.conn.execute("DROP INDEX IF EXISTS idx_ticks_date_key_ts")
                 self.conn.execute("DROP TABLE IF EXISTS ticks")
                 self.conn.execute("ALTER TABLE ticks_temp RENAME TO ticks")
                 self.conn.execute("CREATE INDEX IF NOT EXISTS idx_ticks_date_key_ts ON ticks (date, instrumentKey, ts_ms)")
