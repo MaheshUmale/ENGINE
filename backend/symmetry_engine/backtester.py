@@ -301,6 +301,7 @@ class Backtester:
                             can_trade, _ = self.risk_manager.can_trade(len(self.execution.positions), timestamp=current_time)
                             if can_trade:
                                 if self.execution.execute_signal(signal, timestamp=current_time, index_price=current['close_idx']):
+                                    self.strategy.reset_trailing_sl()
                                     # ONLY SAVE SIGNAL IF WE ACTUALLY TRADED
                                     session = self.get_backtest_session()
                                     session.add(signal)

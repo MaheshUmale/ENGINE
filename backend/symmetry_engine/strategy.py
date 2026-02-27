@@ -324,7 +324,6 @@ class StrategyEngine:
             if self.check_guardrails(side, idx_data, ce_data, pe_data, ref_level):
                 return None
 
-            self.reset_trailing_sl()
             details['ce_key'] = instruments['ce']
             details['pe_key'] = instruments['pe']
             return Signal(index_name=self.index_name, side='BUY_CE' if is_bull else 'BUY_PE',
@@ -349,24 +348,27 @@ class StrategyEngine:
             atr = self.calculate_atr(opt_key) if opt_key else 0
             if atr > 0:
                 # Initialize or update trailing SL
-                if not self.trailing_sl.get(self.index_name):
+                current_sl = self.trailing_sl.get(self.index_name)
+                if current_sl is None or current_sl == 0:
                     self.trailing_sl[self.index_name] = entry_price - (self.atr_multiplier * atr)
                     print(f"SL INITIALIZED for {self.index_name} at {self.trailing_sl[self.index_name]:.2f} (ATR: {atr:.2f})")
+                    current_sl = self.trailing_sl[self.index_name]
 
                 # Update trailing SL (only moves up)
                 new_sl = active_opt_data['ltp'] - (self.atr_multiplier * atr)
-                if new_sl > self.trailing_sl[self.index_name]:
+                if new_sl > current_sl:
                     self.trailing_sl[self.index_name] = new_sl
+                    current_sl = new_sl
 
                 # Check SL hit
-                if active_opt_data['ltp'] < self.trailing_sl[self.index_name]:
+                if active_opt_data['ltp'] < current_sl:
                     return True
 
                 # Profit-Locked Aggressive Trailing
                 # If profit > 3x ATR, lock in at least 1x ATR profit
                 if active_opt_data['ltp'] > entry_price + (3 * atr):
                     locked_sl = entry_price + (1 * atr)
-                    if locked_sl > self.trailing_sl[self.index_name]:
+                    if locked_sl > current_sl:
                         self.trailing_sl[self.index_name] = locked_sl
 
         # 2. Strategy Exits
@@ -413,7 +415,7 @@ class StrategyEngine:
         return False
 
     def reset_trailing_sl(self):
-        self.trailing_sl[self.index_name] = 0
+        self.trailing_sl[self.index_name] = None
 
     def check_mtf_confirmation(self, side, idx_key):
         """Check if 5m trend confirms the 1m signal."""

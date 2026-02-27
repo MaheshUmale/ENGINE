@@ -58,11 +58,11 @@ class TradingViewAPI:
 
             if ':' in tv_full_symbol:
                 parts = tv_full_symbol.split(':')
-                tv_exchange = parts[0]
-                tv_symbol = parts[1]
+                tv_exchange = parts[0].upper()
+                tv_symbol = parts[1].upper()
             else:
                 tv_exchange = 'NSE'
-                tv_symbol = tv_full_symbol
+                tv_symbol = tv_full_symbol.upper()
 
             logger.info(f"Mapped {symbol_or_hrn} -> {tv_exchange}:{tv_symbol}")
 

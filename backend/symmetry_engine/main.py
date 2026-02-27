@@ -193,6 +193,7 @@ class TradingBot:
             # For live, we can use current index price
             idx_data = engine.current_data.get(instruments['index'], {})
             if self.execution.execute_signal(signal, index_price=idx_data.get('ltp')):
+                 engine.reset_trailing_sl()
                  self.last_signal_time[index_name] = minute
 
             # Send Alert

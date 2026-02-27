@@ -121,8 +121,10 @@ class UpstoxAPIClient:
                         if not tv_map:
                             from .tv_api import tv_api
                             # Match requested count for full volume synchronization
+                            # Use canonical symbol for TV to avoid 'NSE:Nifty' casing issues
+                            tv_symbol = symbol_mapper.to_tv_symbol(symbol)
                             tv_candles = await asyncio.wait_for(
-                                asyncio.to_thread(tv_api.get_hist_candles, symbol, interval, count),
+                                asyncio.to_thread(tv_api.get_hist_candles, tv_symbol, interval, count),
                                 timeout=30.0
                             )
                             if tv_candles:
