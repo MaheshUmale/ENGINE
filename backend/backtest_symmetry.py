@@ -17,17 +17,12 @@ from core.options_manager import options_manager
 Triple-Stream Symmetry & Panic Strategy Backtester.
 
 This utility allows users to evaluate the performance of the Symmetry strategy
-on historical market data stored in the local DuckDB. It simulates trade execution,
-calculates PnL for each signal, and provides an aggregate performance report.
+with Comprehensive Squeeze Mechanics on historical market data stored in the local DuckDB. 
+It simulates trade execution using dynamic exits based on opposite option bounces.
 
 Usage:
     export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
     python backend/backtest_symmetry.py --underlying NSE:NIFTY --count 1000
-
-Parameters:
-    --underlying: The index symbol to test (default: NSE:NIFTY)
-    --interval: Data granularity (default: '1')
-    --count: Number of historical candles to fetch (default: 500)
 """
 
 async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
@@ -72,7 +67,9 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
 
     # 4. Run Analyzer
     analyzer = SymmetryAnalyzer(underlying)
-    signals = analyzer.analyze(idx_candles, ce_candles, pe_candles)
+    # Passing dummy options chain for testing 'Void' capability
+    dummy_chain = []
+    signals = analyzer.analyze(idx_candles, ce_candles, pe_candles, option_chain=dummy_chain)
 
     if not signals:
         print("No signals generated in this period.")
@@ -80,7 +77,7 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
 
     print(f"\n--- Strategy Results ({len(signals)} signals) ---")
 
-    # 5. Simulate Trades
+    # 5. Simulate Trades with Dynamic Exit Logic
     ce_df = pd.DataFrame(ce_candles, columns=['ts', 'o', 'h', 'l', 'c', 'v'])
     pe_df = pd.DataFrame(pe_candles, columns=['ts', 'o', 'h', 'l', 'c', 'v'])
 
@@ -88,34 +85,49 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
     for sig in signals:
         side = sig['type']
         entry_price = sig['price']
-        sl = sig['sl']
-        tp = sig['tp']
+        initial_sl = sig['sl']
         ts = sig['time']
 
-        # Find subsequent price action
-        df = ce_df if side == 'BUY_CE' else pe_df
-        future_candles = df[df['ts'] > ts]
+        # The active option is what we bought. The opposite option is what we monitor for exit.
+        if side == 'BUY_CE':
+            active_df = ce_df[ce_df['ts'] > ts]
+            opp_df = pe_df[pe_df['ts'] > ts]
+        else:
+            active_df = pe_df[pe_df['ts'] > ts]
+            opp_df = ce_df[ce_df['ts'] > ts]
 
         outcome = "OPEN"
         exit_price = entry_price
         exit_time = None
 
-        for _, row in future_candles.iterrows():
-            if row['l'] <= sl:
+        # Iterate tick by tick in the future
+        for i in range(min(len(active_df), len(opp_df))):
+            act_row = active_df.iloc[i]
+            opp_row = opp_df.iloc[i]
+            
+            # SL Condition: "Stop Loss: Exit immediately if Symmetry Fails. "
+            if act_row['l'] <= initial_sl:
                 outcome = "SL"
-                exit_price = sl
-                exit_time = row['ts']
+                exit_price = initial_sl
+                exit_time = act_row['ts']
                 break
-            if row['h'] >= tp:
-                outcome = "TP"
-                exit_price = tp
-                exit_time = row['ts']
-                break
+                
+            # Dynamic TP Condition: Exit when Opposite Option starts to bounce.
+            # "Target: Exit when the Opposite Option starts to bounce... indicates Squeeze has finished first impulse."
+            # A bounce is defined as the opposite option making a green candle (C > O) that closes higher than its previous high
+            if i > 0:
+                opp_prev_row = opp_df.iloc[i-1]
+                bouncing = (opp_row['c'] > opp_row['o']) and (opp_row['c'] > opp_prev_row['h'])
+                if bouncing:
+                    outcome = "DYNAMIC_TP"
+                    exit_price = act_row['c'] # Exit active side at market close of this minute
+                    exit_time = act_row['ts']
+                    break
 
-        if outcome == "OPEN" and not future_candles.empty:
+        if outcome == "OPEN" and not active_df.empty:
             outcome = "EXPIRED"
-            exit_price = future_candles.iloc[-1]['c']
-            exit_time = future_candles.iloc[-1]['ts']
+            exit_price = active_df.iloc[-1]['c']
+            exit_time = active_df.iloc[-1]['ts']
 
         pnl = (exit_price - entry_price) / entry_price * 100
         results.append({

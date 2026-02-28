@@ -5,5 +5,6 @@
         "*.parquet": "duckdb.dataFileViewer",
         "*.csv": "duckdb.dataFileViewer",
         "*.tsv": "duckdb.dataFileViewer"
-    }
+    },
+    "python.defaultInterpreterPath": "D:\\\\py_code_workspace\\.venv\\Scripts\\python"
 }
