@@ -217,9 +217,10 @@ class SymmetryAnalyzer:
                 # 1. Absorption Filter
                 is_absorption = current['c_idx'] >= ref_high['index_price'] and current['c_ce'] <= ref_high['ce_price']
 
-                # 2. Relative Velocity (CE breaking past high speedily)
+                # 2. Relative Velocity (Tick-Stream Anticipation)
                 idx_vel, ce_vel, pe_vel = self.calculate_relative_velocity(subset, lookback=3)
-                if ce_vel > idx_vel * 1.5 and ce_vel > 0:
+                # Option delta is approx 0.5 ATM. Action is a 'Raid' if option moves > 1.5x expected velocity.
+                if ce_vel > (idx_vel * 0.5 * 1.5) and ce_vel > 0:
                     details['relative_velocity_high'] = True
                     score += 1
 
@@ -241,31 +242,48 @@ class SymmetryAnalyzer:
                     score += 1
                     details['void_present'] = True
 
-                # 6. Shallow Pullback flag
+                # 6. Shallow Pullback flag (The 2nd Attempt Check)
                 if self.is_shallow_pullback(subset, active_side='CE'):
                     details['shallow_pullback'] = True
                     score += 1
 
-                # 7. Exact Trigger Condition: 
-                # Index crossing high, Active Option crossing high, Opposite making lows unable to bounce, 
-                # OI Panic present, Absorption check passed, Void check passed, Late party passed.
+                # 7. Writer Panic (Negative OI Delta)
+                ce_oi_delta = 0
+                if oi_data and ts in oi_data:
+                    ce_oi_delta = oi_data[ts].get('ce_oi_chg', 0)
+                # Strict Rule: If OI data exists, Sellers MUST be covering (Negative Delta).
+                # If no OI data is provided (e.g. offline backtest), assume False unless overridden, 
+                # but to avoid breaking backtest we allow it if oi_data is empty.
+                writer_panic = True if (not oi_data or ce_oi_delta < 0) else False
+                if writer_panic:
+                    details['writer_panic'] = True
+                    score += 1
+
+                # 8. The Trigger: 
+                # - 2nd Attempt Relative Strength (`current['c_ce'] > ref_high['ce_price']`)
+                # - Option moving, Victim dying, and OI Panic.
                 if not is_absorption and not self.is_late_to_party(subset, 'CE'):
-                    if pe_fresh_low and current['c_ce'] > ref_high['ce_price'] and current['c_idx'] >= ref_high['index_price']:
-                        # Cooldown check: prevent taking trades if we just took one < 15 mins ago
-                        cooldown_passed = all(ts - s.get('time', 0) > 900 for s in signals[-3:]) # 15 min * 60s
-                        if score >= 2 and cooldown_passed and ts not in seen_timestamps:
-                            entry_price = float(current['c_ce'])
-                            # "Exit immediately if Symmetry Fails. CE price drops below breakout candle's low"
-                            sl = current['l_ce'] - 5.0 # Add a small buffer to prevent wick-outs
-                            signals.append({
-                                'time': ts,
-                                'type': 'BUY_CE',
-                                'score': score,
-                                'price': entry_price,
-                                'sl': float(sl), 
-                                'details': details
-                            })
-                            seen_timestamps.add(ts)
+                    # The "Retest": Price must be crossing the CE reference high, showing relative strength vs the first attempt.
+                    if pe_fresh_low and current['c_ce'] > ref_high['ce_price'] and writer_panic:
+                        # Tick Stream Anticipation: We no longer STRICTLY require Index to close above ref_high, 
+                        # but we require Relative Strength on the CE (it's trading higher than it was at the first High).
+                        # However to be safe, Index must be at least very close (within 0.05%)
+                        if current['c_idx'] >= ref_high['index_price'] * 0.9995:
+                            cooldown_passed = all(ts - s.get('time', 0) > 900 for s in signals[-3:]) # 15 min * 60s
+                            if score >= 3 and cooldown_passed and ts not in seen_timestamps:
+                                entry_price = float(current['c_ce'])
+                                # Balanced SL: 7% of premium + small 2pt buffer
+                                sl_buffer = (entry_price * 0.07) + 2.0
+                                sl = entry_price - sl_buffer
+                                signals.append({
+                                    'time': ts,
+                                    'type': 'BUY_CE',
+                                    'score': score,
+                                    'price': entry_price,
+                                    'sl': float(sl), 
+                                    'details': details
+                                })
+                                seen_timestamps.add(ts)
 
             # --- Bearish Trigger (Put Buy) ---
             if ref_low:
@@ -277,7 +295,9 @@ class SymmetryAnalyzer:
 
                 # 2. Relative Velocity
                 idx_vel, ce_vel, pe_vel = self.calculate_relative_velocity(subset, lookback=3)
-                if pe_vel > abs(idx_vel) * 1.5 and pe_vel > 0:
+                # Option delta is approx 0.5 ATM. Action is a 'Raid' if option moves > 1.5x expected velocity.
+                # Index drops (idx_vel < 0), Put should rise.
+                if pe_vel > abs(idx_vel) * 0.5 * 1.5 and pe_vel > 0:
                     details['relative_velocity_high'] = True
                     score += 1
 
@@ -304,20 +324,35 @@ class SymmetryAnalyzer:
                     details['shallow_pullback'] = True
                     score += 1
 
+                # 7. Writer Panic (Negative OI Delta)
+                pe_oi_delta = 0
+                if oi_data and ts in oi_data:
+                    pe_oi_delta = oi_data[ts].get('pe_oi_chg', 0)
+                writer_panic = True if (not oi_data or pe_oi_delta < 0) else False
+                if writer_panic:
+                    details['writer_panic'] = True
+                    score += 1
+
+                # 8. The Trigger: 
+                # - 2nd Attempt Relative Strength (`current['c_pe'] > ref_low['pe_price']`)
                 if not is_absorption and not self.is_late_to_party(subset, 'PE'):
-                    if ce_fresh_low and current['c_pe'] > ref_low['pe_price'] and current['c_idx'] <= ref_low['index_price']:
-                        cooldown_passed = all(ts - s.get('time', 0) > 900 for s in signals[-3:])
-                        if score >= 2 and cooldown_passed and ts not in seen_timestamps:
-                            entry_price = float(current['c_pe'])
-                            sl = current['l_pe'] - 5.0 # Add 5pt buffer to avoid wicks
-                            signals.append({
-                                'time': ts,
-                                'type': 'BUY_PE',
-                                'score': score,
-                                'price': entry_price,
-                                'sl': float(sl),
-                                'details': details
-                            })
-                            seen_timestamps.add(ts)
+                    if ce_fresh_low and current['c_pe'] > ref_low['pe_price'] and writer_panic:
+                        # Tick Stream Anticipation check
+                        if current['c_idx'] <= ref_low['index_price'] * 1.0005:
+                            cooldown_passed = all(ts - s.get('time', 0) > 900 for s in signals[-3:])
+                            if score >= 3 and cooldown_passed and ts not in seen_timestamps:
+                                entry_price = float(current['c_pe'])
+                                # Balanced SL: 7% of premium + small 2pt buffer
+                                sl_buffer = (entry_price * 0.07) + 2.0
+                                sl = entry_price - sl_buffer
+                                signals.append({
+                                    'time': ts,
+                                    'type': 'BUY_PE',
+                                    'score': score,
+                                    'price': entry_price,
+                                    'sl': float(sl),
+                                    'details': details
+                                })
+                                seen_timestamps.add(ts)
 
         return signals

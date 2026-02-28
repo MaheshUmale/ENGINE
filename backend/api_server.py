@@ -769,120 +769,46 @@ async def run_backtest_api(request: Request):
         from_date = data.get('from_date')
         to_date = data.get('to_date')
 
-        # Strategy Parameters
-        params = {
-            'swing_window': int(data.get('swing_window', 10)),
-            'confluence_threshold': int(data.get('confluence_threshold', 4)),
-            'atr_multiplier': float(data.get('atr_multiplier', 1.5)),
-            'enable_index_sync': bool(data.get('enable_index_sync', True))
-        }
-
-        from symmetry_engine.backtester import Backtester
-        import plotly.graph_objects as go
-        import json
-        import uuid
-
-        # Use a unique DB for each backtest to allow concurrency
-        run_id = str(uuid.uuid4())[:8]
-        bt_db = f"data/backtest_{run_id}.db"
-        bt = Backtester(index_name, db_path=bt_db)
-        bt.params = params
-
-        # Run backtest
-        logger.info(f"Running backtest for {index_name} with params: {params}")
-        final_df = await bt.run_backtest(from_date, to_date)
-
-        # Generate Report from the specific backtest DB
-        session = bt.get_backtest_session()
-        # Query BUY trades that are CLOSED, as they contain entry_price, exit_price and pnl
-        # We also need the exit timestamp which is stored in the corresponding SELL trade
-        trades = session.query(Trade).filter(Trade.status == 'CLOSED', Trade.side == 'BUY').order_by(Trade.timestamp.asc()).all()
-
-        # Helper to find exit timestamps
-        sell_trades = session.query(Trade).filter(Trade.status == 'CLOSED', Trade.side == 'SELL').all()
-        exit_map = {(t.index_name, t.instrument_key, t.quantity, t.pnl): t.timestamp for t in sell_trades}
-
-        # Candles for chart
-        candles = []
+        underlying = "NSE:NIFTY" if "NIFTY" in index_name.upper() else "NSE:BANKNIFTY"
+        
+        # Calculate approximate candles (375 per day) based on date range
         import datetime
-        if final_df is not None and not final_df.empty:
-            for _, row in final_df.iterrows():
-                # Naive IST timestamps from backtester are treated as UTC for epoch calculation
-                # to ensure they align with the numeric display on the chart.
-                ts = int(row['timestamp'].replace(tzinfo=datetime.timezone.utc).timestamp())
-                candles.append([
-                    ts, row['open_idx'], row['high_idx'], row['low_idx'], row['close_idx']
-                ])
+        fmt = "%Y-%m-%d"
+        try:
+            d1 = datetime.datetime.strptime(from_date, fmt)
+            d2 = datetime.datetime.strptime(to_date, fmt)
+            days = max(1, (d2 - d1).days)
+            # Rough estimate ignoring weekends, we fetch extra just to be sure
+            count = min(5000, days * 375 + 375)
+        except:
+            count = 1000
 
-        trade_list = []
-        equity_data = []
-        cum_pnl = 0
+        logger.info(f"Running optimized backtest engine for {underlying} ({count} candles)")
 
-        for t in trades:
-            cum_pnl += t.pnl
-            # Naive IST timestamps from backtester are treated as UTC for epoch calculation
-            ts_epoch = int(t.timestamp.replace(tzinfo=datetime.timezone.utc).timestamp())
+        from backtest_symmetry import run_backtest
+        # Call the refactored CLI function, asking it to return the raw data
+        gui_result = await run_backtest(underlying=underlying, interval='1', count=count, return_json=True)
 
-            # Find exit timestamp
-            exit_ts = exit_map.get((t.index_name, t.instrument_key, t.quantity, t.pnl))
-            exit_ts_epoch = int(exit_ts.replace(tzinfo=datetime.timezone.utc).timestamp()) if exit_ts else ts_epoch + 300 # Fallback 5m
-
-            trade_list.append({
-                "timestamp": ts_epoch,
-                "exit_timestamp": exit_ts_epoch,
-                "index": t.index_name,
-                "instrument": t.instrument_key,
-                "price": t.price, # Used as entry price in GUI
-                "exit_price": t.exit_price,
-                "pnl": t.pnl
-            })
-            equity_data.append({"time": t.timestamp, "pnl": cum_pnl})
-
-        # Calculate KPIs
-        pnls = [t.pnl for t in trades]
-        total_pnl = sum(pnls)
-        trade_count = len(pnls)
-        win_rate = (len([p for p in pnls if p > 0]) / trade_count * 100) if trade_count > 0 else 0
-
-        df_equity = pd.DataFrame(equity_data)
-        equity_json = None
-        max_dd = 0
-        sharpe = 0
-
-        if not df_equity.empty:
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df_equity['time'], y=df_equity['pnl'], mode='lines', name='Equity'))
-            equity_json = fig.to_json()
-
-            cum_pnl_series = df_equity['pnl']
-            max_pnl = cum_pnl_series.expanding().max()
-            drawdown = cum_pnl_series - max_pnl
-            max_dd = drawdown.min()
-
-            if trade_count > 1:
-                avg_pnl = total_pnl / trade_count
-                std = pd.Series(pnls).std()
-                sharpe = (avg_pnl / std) * (252**0.5) if std != 0 else 0
-
-        session.close()
-
-        # Persistence: Keep the SQLite DB so user can revisit it
-        # We can return the db path in the response so the frontend knows which DB to query for detailed analysis if needed.
+        if not gui_result:
+            return {"status": "error", "message": "No data returned from Backtester"}
 
         return {
             "status": "success",
             "report": {
-                "total_pnl": total_pnl,
-                "win_rate": win_rate,
-                "trade_count": trade_count,
-                "max_drawdown": max_dd,
-                "sharpe_ratio": sharpe,
-                "equity_curve": equity_json,
-                "trades": trade_list[::-1], # Latest first for log
-                "candles": candles,
-                "db_path": bt_db
+                "total_pnl": gui_result['total_pnl'],
+                "win_rate": gui_result['win_rate'],
+                "trade_count": len(gui_result['results']),
+                "max_drawdown": 0, # Not currently tracked in fast-mode
+                "sharpe_ratio": 0,
+                "equity_curve": None, # Plotly handled offline
+                "trades": gui_result['results'][::-1], # Latest first for log
+                "candles": gui_result['candles'], 
+                "db_path": "memory"
             }
         }
+    except Exception as e:
+        logger.error(f"Backtest API error: {e}")
+        return {"status": "error", "message": str(e)}
     except Exception as e:
         logger.error(f"Backtest API error: {e}")
         return {"status": "error", "message": str(e)}

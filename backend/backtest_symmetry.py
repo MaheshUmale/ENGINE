@@ -28,7 +28,7 @@ Usage:
     python backend/backtest_symmetry.py --underlying NSE:NIFTY --count 2625
 """
 
-async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
+async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500, return_json=False):
     print(f"=== Symmetry Strategy Backtest: {underlying} ===", flush=True)
     initialize_default_providers()
     # Force Upstox for backtest to avoid TV session issues in headless environment
@@ -40,6 +40,8 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
     if not idx_candles:
         print("Error: Could not fetch index candles.")
         return
+
+    idx_df = pd.DataFrame(idx_candles, columns=['ts', 'o', 'h', 'l', 'c', 'v'])
 
     # 2. Discover ATM symbols
     print(f"Index data fetched. Last spot: {idx_candles[-1][4]}")
@@ -90,7 +92,7 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
         entry_price = sig['price']
         initial_sl = sig['sl']
         ts = sig['time']
-
+        atr_val = sig.get('atr', 20.0) # Assume 20pt ATR if missing
         # The active option is what we bought. The opposite option is what we monitor for exit.
         if side == 'BUY_CE':
             active_df = ce_df[ce_df['ts'] > ts]
@@ -98,15 +100,26 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
         else:
             active_df = pe_df[pe_df['ts'] > ts]
             opp_df = ce_df[ce_df['ts'] > ts]
+            
+        future_idx_df = idx_df[idx_df['ts'] > ts]
 
         outcome = "OPEN"
         exit_price = entry_price
         exit_time = None
+        
+        entry_idx_candle = idx_df[idx_df['ts'] == ts]
+        entry_opt_candle = ce_df[ce_df['ts'] == ts] if side == 'BUY_CE' else pe_df[pe_df['ts'] == ts]
+        
+        entry_idx_high = float(entry_idx_candle['h'].iloc[0]) if not entry_idx_candle.empty else 0
+        entry_opt_high = float(entry_opt_candle['h'].iloc[0]) if not entry_opt_candle.empty else entry_price
+
+        asym_trap_count = 0
 
         # Iterate tick by tick in the future
-        for i in range(min(len(active_df), len(opp_df))):
+        for i in range(min(len(active_df), len(opp_df), len(future_idx_df))):
             act_row = active_df.iloc[i]
             opp_row = opp_df.iloc[i]
+            idx_row = future_idx_df.iloc[i]
             
             # SL Condition: "Stop Loss: Exit immediately if Symmetry Fails. "
             if act_row['l'] <= initial_sl:
@@ -115,11 +128,37 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
                 exit_time = act_row['ts']
                 break
                 
+            # Time-Based SL: Removed rigid 3-min rule. Added 15-min stagnation exit (PnL < -2%).
+            current_pnl_pct = (act_row['c'] - entry_price) / entry_price * 100
+            if i >= 15 and current_pnl_pct < -2.0:
+                outcome = "TIME_SL"
+                exit_price = act_row['c']
+                exit_time = act_row['ts']
+                break
+                
+            # Asymmetry Absorption Exit: Relaxed to 5 minutes of trap
+            if idx_row['h'] > entry_idx_high and act_row['h'] < entry_opt_high:
+                asym_trap_count += 1
+            else:
+                asym_trap_count = max(0, asym_trap_count - 1) # decay the count
+                
+            if asym_trap_count >= 5:
+                outcome = "ASYMMETRY_EXIT"
+                exit_price = act_row['c']
+                exit_time = act_row['ts']
+                break
+                
             # Dynamic TP Condition: Exit when Opposite Option starts to bounce.
-            if i > 0:
+            if i > 2: # Require at least 3 minutes
                 opp_prev_row = opp_df.iloc[i-1]
-                bouncing = (opp_row['c'] > opp_row['o']) and (opp_row['c'] > opp_prev_row['h'])
-                if bouncing:
+                opp_prev_2_row = opp_df.iloc[i-2]
+                
+                # Stronger bounce required: 2 consecutive higher highs and higher closes
+                bouncing = (opp_row['c'] > opp_row['o']) and \
+                           (opp_row['c'] > opp_prev_row['h']) and \
+                           (opp_prev_row['c'] > opp_prev_2_row['h'])
+                           
+                if bouncing and current_pnl_pct > 2.0: # Ensure we are in profit or flat before taking dynamic TP
                     outcome = "DYNAMIC_TP"
                     exit_price = act_row['c'] # Exit active side at market close of this minute
                     exit_time = act_row['ts']
@@ -153,7 +192,35 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
     print(f"Total PnL: {total_pnl:.2f}%")
     print(f"Avg PnL per trade: {res_df['pnl%'].mean() if not res_df.empty else 0:.2f}%")
 
-    # --- 6. Generate Visualization ---
+    # --- 6. Return JSON for API if requested ---
+    if return_json:
+        # Pre-format candles for TV Lightweight Charts: [time, open, high, low, close]
+        candles_fmt = []
+        for c in idx_candles:
+            # TV expects seconds
+            candles_fmt.append([int(c[0]), c[1], c[2], c[3], c[4]])
+            
+        # Format trades to match old backend GUI expectations
+        formatted_results = []
+        for r in results:
+            formatted_results.append({
+                "timestamp": int(r['ts']),
+                "exit_timestamp": int(r['exit_ts']),
+                "index": underlying,
+                "instrument": "CE" if r['type'] == 'BUY_CE' else "PE",
+                "price": r['entry'],
+                "exit_price": r['exit'],
+                "pnl": r['pnl%']
+            })
+            
+        return {
+            "total_pnl": total_pnl,
+            "win_rate": win_rate,
+            "results": formatted_results,
+            "candles": candles_fmt
+        }
+
+    # --- 7. Generate Visualization ---
     print("\nGenerating Interactive Plotly Chart (backtest_chart.html)...")
     idx_df = pd.DataFrame(idx_candles, columns=['ts', 'o', 'h', 'l', 'c', 'v'])
     
@@ -166,10 +233,10 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
                         subplot_titles=("Index Price", f"Call Option ({ce_sym})", f"Put Option ({pe_sym})"),
                         vertical_spacing=0.08)
 
-    # Base line charts
-    fig.add_trace(go.Scatter(x=idx_df['dt'], y=idx_df['c'], name='Index Close', line=dict(color='black')), row=1, col=1)
-    fig.add_trace(go.Scatter(x=ce_df['dt'], y=ce_df['c'], name='CE Close', line=dict(color='green')), row=2, col=1)
-    fig.add_trace(go.Scatter(x=pe_df['dt'], y=pe_df['c'], name='PE Close', line=dict(color='red')), row=3, col=1)
+    # Base line charts -> Changed to Candlesticks
+    fig.add_trace(go.Candlestick(x=idx_df['dt'], open=idx_df['o'], high=idx_df['h'], low=idx_df['l'], close=idx_df['c'], name='Index Close'), row=1, col=1)
+    fig.add_trace(go.Candlestick(x=ce_df['dt'], open=ce_df['o'], high=ce_df['h'], low=ce_df['l'], close=ce_df['c'], name='CE Close'), row=2, col=1)
+    fig.add_trace(go.Candlestick(x=pe_df['dt'], open=pe_df['o'], high=pe_df['h'], low=pe_df['l'], close=pe_df['c'], name='PE Close'), row=3, col=1)
 
     # Plot markers for entries and exits
     for res in results:
@@ -192,7 +259,10 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
     fig.update_layout(
         height=1000, 
         title_text=f"Symmetry Strategy Backtest: {underlying}",
-        hovermode="x unified"
+        hovermode="x unified",
+        xaxis_rangeslider_visible=False,
+        xaxis2_rangeslider_visible=False,
+        xaxis3_rangeslider_visible=False
     )
     
     # Remove gaps (Weekends and Outside 09:15-15:30 IST)
