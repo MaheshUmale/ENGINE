@@ -147,6 +147,21 @@ class SymmetryAnalyzer:
             return -1 # Bearish (PCR decreasing -> Put buying)
         return 0
 
+    def calculate_ema(self, df, period=20, prefix='_idx'):
+        """Calculates Exponential Moving Average for trend filtering."""
+        c_col = f'c{prefix}'
+        if c_col not in df.columns: c_col = 'c'
+        if len(df) < period:
+            return 0
+        return df[c_col].ewm(span=period, adjust=False).mean().iloc[-1]
+
+    def calculate_avg_volume(self, df, period=10, prefix='_idx'):
+        """Calculates average volume over N candles."""
+        v_col = f'v{prefix}'
+        if v_col not in df.columns: v_col = 'v'
+        if len(df) < period: return 0
+        return df[v_col].tail(period).mean()
+
     def check_void_above(self, current_index, direction, option_chain):
         """
         The 'Void' Check: Ensure there's no massive OI wall 5-10 points away.
@@ -214,6 +229,20 @@ class SymmetryAnalyzer:
                 score = 0
                 details = {}
 
+                # 0. Volume Confirmation (Surge > 1.5x MA)
+                avg_vol = self.calculate_avg_volume(subset, period=20)
+                vol_surge = current['v_idx'] > (avg_vol * 1.5) if avg_vol > 0 else False
+                if vol_surge:
+                    score += 1
+                    details['volume_confirmation'] = True
+
+                # 0.1 Trend Filter (5m EMA proxy via 20-period EMA on 1m chart)
+                ema_val = self.calculate_ema(subset, period=20)
+                trend_ok = current['c_idx'] > ema_val if ema_val > 0 else True
+                if trend_ok:
+                    score += 1
+                    details['trend_confirmation'] = True
+
                 # 1. Absorption Filter
                 is_absorption = current['c_idx'] >= ref_high['index_price'] and current['c_ce'] <= ref_high['ce_price']
 
@@ -251,13 +280,12 @@ class SymmetryAnalyzer:
                 ce_oi_delta = 0
                 if oi_data and ts in oi_data:
                     ce_oi_delta = oi_data[ts].get('ce_oi_chg', 0)
-                # Strict Rule: If OI data exists, Sellers MUST be covering (Negative Delta).
-                # If no OI data is provided (e.g. offline backtest), assume False unless overridden, 
-                # but to avoid breaking backtest we allow it if oi_data is empty.
-                writer_panic = True if (not oi_data or ce_oi_delta < 0) else False
+
+                # STRICTER OI RULE: -500 minimum delta to filter noise
+                writer_panic = True if (not oi_data or ce_oi_delta < -500) else False
                 if writer_panic:
                     details['writer_panic'] = True
-                    score += 1
+                    score += 2 # Higher weighting for real panic
 
                 # 8. The Trigger: 
                 # - 2nd Attempt Relative Strength (`current['c_ce'] > ref_high['ce_price']`)
@@ -270,7 +298,8 @@ class SymmetryAnalyzer:
                         # However to be safe, Index must be at least very close (within 0.05%)
                         if current['c_idx'] >= ref_high['index_price'] * 0.9995:
                             cooldown_passed = all(ts - s.get('time', 0) > 900 for s in signals[-3:]) # 15 min * 60s
-                            if score >= 3 and cooldown_passed and ts not in seen_timestamps:
+                            # Increased threshold from 3 to 5 for high-confidence trades
+                            if score >= 5 and cooldown_passed and ts not in seen_timestamps:
                                 entry_price = float(current['c_ce'])
                                 # Balanced SL: 7% of premium + small 2pt buffer
                                 sl_buffer = (entry_price * 0.07) + 2.0
@@ -289,6 +318,20 @@ class SymmetryAnalyzer:
             if ref_low:
                 score = 0
                 details = {}
+
+                # 0. Volume Confirmation (Surge > 1.5x MA)
+                avg_vol = self.calculate_avg_volume(subset, period=20)
+                vol_surge = current['v_idx'] > (avg_vol * 1.5) if avg_vol > 0 else False
+                if vol_surge:
+                    score += 1
+                    details['volume_confirmation'] = True
+
+                # 0.1 Trend Filter (5m EMA proxy)
+                ema_val = self.calculate_ema(subset, period=20)
+                trend_ok = current['c_idx'] < ema_val if ema_val > 0 else True
+                if trend_ok:
+                    score += 1
+                    details['trend_confirmation'] = True
 
                 # 1. Absorption Filter
                 is_absorption = current['c_idx'] <= ref_low['index_price'] and current['c_pe'] <= ref_low['pe_price']
@@ -328,10 +371,12 @@ class SymmetryAnalyzer:
                 pe_oi_delta = 0
                 if oi_data and ts in oi_data:
                     pe_oi_delta = oi_data[ts].get('pe_oi_chg', 0)
-                writer_panic = True if (not oi_data or pe_oi_delta < 0) else False
+
+                # STRICTER OI RULE
+                writer_panic = True if (not oi_data or pe_oi_delta < -500) else False
                 if writer_panic:
                     details['writer_panic'] = True
-                    score += 1
+                    score += 2
 
                 # 8. The Trigger: 
                 # - 2nd Attempt Relative Strength (`current['c_pe'] > ref_low['pe_price']`)
@@ -340,7 +385,7 @@ class SymmetryAnalyzer:
                         # Tick Stream Anticipation check
                         if current['c_idx'] <= ref_low['index_price'] * 1.0005:
                             cooldown_passed = all(ts - s.get('time', 0) > 900 for s in signals[-3:])
-                            if score >= 3 and cooldown_passed and ts not in seen_timestamps:
+                            if score >= 5 and cooldown_passed and ts not in seen_timestamps:
                                 entry_price = float(current['c_pe'])
                                 # Balanced SL: 7% of premium + small 2pt buffer
                                 sl_buffer = (entry_price * 0.07) + 2.0
