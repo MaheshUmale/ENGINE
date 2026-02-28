@@ -156,9 +156,11 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
     # --- 6. Generate Visualization ---
     print("\nGenerating Interactive Plotly Chart (backtest_chart.html)...")
     idx_df = pd.DataFrame(idx_candles, columns=['ts', 'o', 'h', 'l', 'c', 'v'])
-    idx_df['dt'] = pd.to_datetime(idx_df['ts'], unit='s')
-    ce_df['dt'] = pd.to_datetime(ce_df['ts'], unit='s')
-    pe_df['dt'] = pd.to_datetime(pe_df['ts'], unit='s')
+    
+    # Convert TS to IST (UTC + 5:30)
+    idx_df['dt'] = pd.to_datetime(idx_df['ts'], unit='s', utc=True).dt.tz_convert('Asia/Kolkata')
+    ce_df['dt'] = pd.to_datetime(ce_df['ts'], unit='s', utc=True).dt.tz_convert('Asia/Kolkata')
+    pe_df['dt'] = pd.to_datetime(pe_df['ts'], unit='s', utc=True).dt.tz_convert('Asia/Kolkata')
 
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, 
                         subplot_titles=("Index Price", f"Call Option ({ce_sym})", f"Put Option ({pe_sym})"),
@@ -171,8 +173,8 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
 
     # Plot markers for entries and exits
     for res in results:
-        entry_dt = pd.to_datetime(res['ts'], unit='s')
-        exit_dt = pd.to_datetime(res['exit_ts'], unit='s')
+        entry_dt = pd.to_datetime(res['ts'], unit='s', utc=True).tz_convert('Asia/Kolkata')
+        exit_dt = pd.to_datetime(res['exit_ts'], unit='s', utc=True).tz_convert('Asia/Kolkata')
         
         target_row = 2 if res['type'] == 'BUY_CE' else 3
         color = 'blue' if res['pnl%'] > 0 else 'orange'
@@ -187,7 +189,20 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
                                  marker=dict(symbol='x', size=10, color=color),
                                  name=f"Exit ({res['outcome']}) {res['pnl%']:.2f}%"), row=target_row, col=1)
 
-    fig.update_layout(height=1000, title_text=f"Symmetry Strategy Backtest: {underlying}")
+    fig.update_layout(
+        height=1000, 
+        title_text=f"Symmetry Strategy Backtest: {underlying}",
+        hovermode="x unified"
+    )
+    
+    # Remove gaps (Weekends and Outside 09:15-15:30 IST)
+    fig.update_xaxes(
+        rangebreaks=[
+            dict(bounds=["sat", "mon"]), # hide weekends
+            dict(bounds=[15.5, 9.25], pattern="hour"),  # hide 3:30 PM to 9:15 AM
+        ]
+    )
+    
     fig.write_html("backtest_chart.html")
     print("Chart saved to 'd:\\ENGINE\\backtest_chart.html'")
 
