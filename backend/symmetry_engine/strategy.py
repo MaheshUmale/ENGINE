@@ -35,7 +35,7 @@ class StrategyEngine:
         # Strategy Parameters (can be overridden)
         self.swing_window = SWING_WINDOW
         self.confluence_threshold = CONFLUENCE_THRESHOLD
-        self.atr_multiplier = 1.5 # Default multiplier for SL
+        self.atr_multiplier = 2.0 # Default multiplier for SL (Increased to give trades more room)
 
     def update_data(self, instrument_key, data):
         """Update current tick data."""
@@ -87,6 +87,13 @@ class StrategyEngine:
             return 0
         return (history[-1]['close'] - history[-4]['close']) / 3
 
+    def calculate_avg_volume(self, instrument_key, period=10):
+        """Calculates average volume over N candles."""
+        history = self.candle_history.get(instrument_key, [])
+        if len(history) < period: return 0
+        volumes = [c.get('volume', 0) for c in history[-period:]]
+        return sum(volumes) / period
+
     def calculate_relative_strength(self, option_key, index_key):
         """Relative Strength: (Option % Change) / (Index % Change)."""
         opt_history = self.candle_history.get(option_key, [])
@@ -117,7 +124,7 @@ class StrategyEngine:
 
         Expert Optimization:
         1. Uses a custom window (default 15) for structural relevance.
-        2. Requires move magnitude > 1.2 * ATR to filter noise and focus on intent.
+        2. Requires move magnitude > 1.5 * ATR to filter noise and focus on intent.
         3. Requires 3-candle pullback for stronger confirmation that the peak/trough
            is indeed a 'Wall' and not just a minor pause.
         """
@@ -133,7 +140,7 @@ class StrategyEngine:
         # Calculate ATR for the index
         atr = self.calculate_atr(history=candles.to_dict('records'))
         # High threshold for 'Expert' scalping: Move must be significant
-        atr_threshold = atr * 1.2 if atr > 0 else 5.0
+        atr_threshold = atr * 1.5 if atr > 0 else 5.0
 
         # Structural high/low in the custom window
         last_n = candles.tail(window)
@@ -197,6 +204,21 @@ class StrategyEngine:
 
         prices = [c['close'] for c in history]
         return pd.Series(prices).ewm(span=period, adjust=False).mean().iloc[-1]
+
+    def is_higher_low(self, instrument_key):
+        """Detects if the last 3 candles formed a Higher Low on the option chart."""
+        history = self.candle_history.get(instrument_key, [])
+        if len(history) < 3: return False
+        c = history[-1]
+        p = history[-2]
+        pp = history[-3]
+        return c['low'] > p['low'] and pp['low'] > p['low']
+
+    def is_pullback_test(self, current_price, ref_price, tolerance=0.01):
+        """Checks if price is testing the reference level from above (Pullback)."""
+        if ref_price <= 0: return False
+        # Price is within 1% of ref_price but still above it
+        return ref_price <= current_price <= ref_price * (1 + tolerance)
 
     def generate_signals(self, instruments):
         """
@@ -273,6 +295,13 @@ class StrategyEngine:
         score = 0
         details = {}
 
+        # 0. Volume Confirmation
+        avg_vol = self.calculate_avg_volume(instruments['index'])
+        current_vol = idx_data.get('volume', 0)
+        if avg_vol > 0 and current_vol > avg_vol:
+            score += 1
+            details['volume_confirmation'] = True
+
         # 1. Index Breakout/Breakdown
         if (is_bull and current_idx_price > ref_level['index_price']) or \
            (not is_bull and current_idx_price < ref_level['index_price']):
@@ -284,6 +313,20 @@ class StrategyEngine:
         if active_opt_data['ltp'] > ref_opt_price:
             score += 1
             details['active_opt_break'] = True
+
+            # THE SQUEEZE: Option Lead detection (reward Speed over Validation)
+            if not details.get('index_break'):
+                score += 1
+                details['option_leading'] = True
+
+        # PULLBACK: Higher Low on Option or Test of Ref Level
+        if self.is_higher_low(active_opt_key):
+            score += 1
+            details['higher_low'] = True
+
+        if self.is_pullback_test(active_opt_data['ltp'], ref_opt_price):
+            score += 1
+            details['pullback_test'] = True
 
         # 3. Symmetry (Opposite Option Breakdown)
         ref_opp_price = ref_level['pe_price'] if is_bull else ref_level['ce_price']
@@ -341,6 +384,23 @@ class StrategyEngine:
         opp_opt_data = pe_data if side == 'BUY_CE' else ce_data
         entry_price = getattr(position, 'entry_price', 0)
 
+        # 0. Time-Based Exit (15 minutes without 1% profit)
+        entry_time = getattr(position, 'timestamp', None)
+        if entry_time:
+            # Handle potential string or datetime
+            if isinstance(entry_time, str):
+                try: entry_time = datetime.datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
+                except: entry_time = None
+
+            if entry_time:
+                # Assuming current data timestamp is also available or use now
+                now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+                if (now - entry_time.replace(tzinfo=None)).total_seconds() > 900: # 15 mins
+                    profit_pct = (active_opt_data['ltp'] - entry_price) / entry_price
+                    if profit_pct < 0.01:
+                        print(f"TIME EXIT: {self.index_name} stagnant for 15 mins.")
+                        return True
+
         # 1. ATR-based Trailing SL
         if SL_TRAILING:
             # Calculate ATR for the active option
@@ -380,14 +440,16 @@ class StrategyEngine:
         if active_opt_data['ltp'] < entry_price * 0.8:
             return True
 
-        # 4. SL: Symmetry break
+        # 4. SL: Symmetry break (Index makes new high/low but Option fails to follow)
         if side == 'BUY_CE':
             ref_high = self.reference_levels.get('High')
-            if ref_high and idx_data['ltp'] > ref_high['index_price'] and ce_data['ltp'] < ref_high['ce_price']:
+            if ref_high and idx_data['ltp'] > ref_high['index_price'] and ce_data['ltp'] <= ref_high['ce_price']:
+                print(f"SYMMETRY BREAK EXIT: Index High but CE Lagging.")
                 return True
         else:
             ref_low = self.reference_levels.get('Low')
-            if ref_low and idx_data['ltp'] < ref_low['index_price'] and pe_data['ltp'] < ref_low['pe_price']:
+            if ref_low and idx_data['ltp'] < ref_low['index_price'] and pe_data['ltp'] <= ref_low['pe_price']:
+                print(f"SYMMETRY BREAK EXIT: Index Low but PE Lagging.")
                 return True
 
         return False
