@@ -4,6 +4,8 @@ import numpy as np
 import sys
 import os
 from datetime import datetime
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # Add current directory to path
 sys.path.append(os.getcwd())
@@ -19,10 +21,11 @@ Triple-Stream Symmetry & Panic Strategy Backtester.
 This utility allows users to evaluate the performance of the Symmetry strategy
 with Comprehensive Squeeze Mechanics on historical market data stored in the local DuckDB. 
 It simulates trade execution using dynamic exits based on opposite option bounces.
+It also generates an interactive HTML chart (backtest_chart.html) for visual inspection.
 
 Usage:
     export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
-    python backend/backtest_symmetry.py --underlying NSE:NIFTY --count 1000
+    python backend/backtest_symmetry.py --underlying NSE:NIFTY --count 2625
 """
 
 async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
@@ -113,8 +116,6 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
                 break
                 
             # Dynamic TP Condition: Exit when Opposite Option starts to bounce.
-            # "Target: Exit when the Opposite Option starts to bounce... indicates Squeeze has finished first impulse."
-            # A bounce is defined as the opposite option making a green candle (C > O) that closes higher than its previous high
             if i > 0:
                 opp_prev_row = opp_df.iloc[i-1]
                 bouncing = (opp_row['c'] > opp_row['o']) and (opp_row['c'] > opp_prev_row['h'])
@@ -132,6 +133,8 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
         pnl = (exit_price - entry_price) / entry_price * 100
         results.append({
             'time': datetime.fromtimestamp(ts).strftime('%H:%M:%S'),
+            'ts': ts,
+            'exit_ts': exit_time if exit_time else ts,
             'type': side,
             'entry': entry_price,
             'exit': exit_price,
@@ -140,15 +143,53 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500):
         })
 
     res_df = pd.DataFrame(results)
-    print(res_df.to_string(index=False))
+    print(res_df.drop(columns=['ts', 'exit_ts']).to_string(index=False))
 
-    win_rate = len(res_df[res_df['pnl%'] > 0]) / len(res_df) * 100
-    total_pnl = res_df['pnl%'].sum()
+    win_rate = len(res_df[res_df['pnl%'] > 0]) / len(res_df) * 100 if not res_df.empty else 0
+    total_pnl = res_df['pnl%'].sum() if not res_df.empty else 0
 
     print(f"\nSummary:")
     print(f"Win Rate: {win_rate:.2f}%")
     print(f"Total PnL: {total_pnl:.2f}%")
-    print(f"Avg PnL per trade: {res_df['pnl%'].mean():.2f}%")
+    print(f"Avg PnL per trade: {res_df['pnl%'].mean() if not res_df.empty else 0:.2f}%")
+
+    # --- 6. Generate Visualization ---
+    print("\nGenerating Interactive Plotly Chart (backtest_chart.html)...")
+    idx_df = pd.DataFrame(idx_candles, columns=['ts', 'o', 'h', 'l', 'c', 'v'])
+    idx_df['dt'] = pd.to_datetime(idx_df['ts'], unit='s')
+    ce_df['dt'] = pd.to_datetime(ce_df['ts'], unit='s')
+    pe_df['dt'] = pd.to_datetime(pe_df['ts'], unit='s')
+
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, 
+                        subplot_titles=("Index Price", f"Call Option ({ce_sym})", f"Put Option ({pe_sym})"),
+                        vertical_spacing=0.08)
+
+    # Base line charts
+    fig.add_trace(go.Scatter(x=idx_df['dt'], y=idx_df['c'], name='Index Close', line=dict(color='black')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=ce_df['dt'], y=ce_df['c'], name='CE Close', line=dict(color='green')), row=2, col=1)
+    fig.add_trace(go.Scatter(x=pe_df['dt'], y=pe_df['c'], name='PE Close', line=dict(color='red')), row=3, col=1)
+
+    # Plot markers for entries and exits
+    for res in results:
+        entry_dt = pd.to_datetime(res['ts'], unit='s')
+        exit_dt = pd.to_datetime(res['exit_ts'], unit='s')
+        
+        target_row = 2 if res['type'] == 'BUY_CE' else 3
+        color = 'blue' if res['pnl%'] > 0 else 'orange'
+        
+        # Entry Maker
+        fig.add_trace(go.Scatter(x=[entry_dt], y=[res['entry']], mode='markers', 
+                                 marker=dict(symbol='triangle-up', size=12, color='blue'),
+                                 name=f"Entry {res['type']}"), row=target_row, col=1)
+                                 
+        # Exit Marker
+        fig.add_trace(go.Scatter(x=[exit_dt], y=[res['exit']], mode='markers', 
+                                 marker=dict(symbol='x', size=10, color=color),
+                                 name=f"Exit ({res['outcome']}) {res['pnl%']:.2f}%"), row=target_row, col=1)
+
+    fig.update_layout(height=1000, title_text=f"Symmetry Strategy Backtest: {underlying}")
+    fig.write_html("backtest_chart.html")
+    print("Chart saved to 'd:\\ENGINE\\backtest_chart.html'")
 
 if __name__ == "__main__":
     import argparse
