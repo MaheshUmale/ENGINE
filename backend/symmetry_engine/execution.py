@@ -115,6 +115,7 @@ class ExecutionEngine:
 
         self.positions[signal.index_name] = {
             'trade_id': trade.id,
+            'timestamp': ts,
             'side': signal.side,
             'entry_price': entry_price, # Use the actual slippage-adjusted entry price
             'quantity': quantity,

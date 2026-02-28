@@ -83,6 +83,11 @@ class Backtester:
             date_str = current_date.strftime('%Y-%m-%d')
             print(f"Processing date: {date_str}")
 
+            # Reset strategy state for the new day
+            for engine in self.engines.values():
+                engine.reference_levels = {'High': None, 'Low': None}
+                engine.reset_trailing_sl()
+
             # 1. Fetch historical data for Index to get ATM at market open
             idx_morning = await self.data_provider.get_historical_data(INDICES[self.index_name]['index_key'], from_date=date_str, to_date=date_str)
 
@@ -228,7 +233,10 @@ class Backtester:
 
                 # Update other engines for sync
                 for name in other_indices_hist:
-                    self.engines[name].update_data(INDICES[name]['index_key'], {'ltp': current[f'close_{name}']})
+                    self.engines[name].update_data(INDICES[name]['index_key'], {
+                        'ltp': current[f'close_{name}'],
+                        'volume': current.get(f'volume_{name}', 0)
+                    })
 
                 for opt in details['option_chain']:
                     for side in ['ce', 'pe']:
@@ -248,30 +256,37 @@ class Backtester:
 
                 self.strategy.update_candle(details['index'], {
                     'open': current['open_idx'], 'high': current['high_idx'],
-                    'low': current['low_idx'], 'close': current['close_idx']
+                    'low': current['low_idx'], 'close': current['close_idx'],
+                    'volume': current.get('volume_fut', 0)
                 })
 
                 for name in other_indices_hist:
                     self.engines[name].update_candle(INDICES[name]['index_key'], {
                         'open': current[f'open_{name}'], 'high': current[f'high_{name}'],
-                        'low': current[f'low_{name}'], 'close': current[f'close_{name}']
+                        'low': current[f'low_{name}'], 'close': current[f'close_{name}'],
+                        'volume': current.get(f'volume_{name}', 0)
                     })
 
-                # Update 5m candle if at 5m boundary
+                # Update 5m candle if at 5m boundary (Avoid look-ahead bias)
+                # At 09:20, we update the candle that started at 09:15 and ended at 09:19:59
                 if current_time.minute % 5 == 0:
                     ts = current_time.replace(second=0, microsecond=0)
-                    c5 = combined_5m.loc[ts]
-                    self.strategy.update_candle(details['index'], {
-                        'open': c5['open_idx'], 'high': c5['high_idx'],
-                        'low': c5['low_idx'], 'close': c5['close_idx']
-                    }, interval=5)
+                    prev_ts = ts - datetime.timedelta(minutes=5)
 
-                    for name in other_indices_hist:
-                        c5o = other_5m[name].loc[ts]
-                        self.engines[name].update_candle(INDICES[name]['index_key'], {
-                            'open': c5o[f'open_{name}'], 'high': c5o[f'high_{name}'],
-                            'low': c5o[f'low_{name}'], 'close': c5o[f'close_{name}']
+                    if prev_ts in combined_5m.index:
+                        c5 = combined_5m.loc[prev_ts]
+                        self.strategy.update_candle(details['index'], {
+                            'open': c5['open_idx'], 'high': c5['high_idx'],
+                            'low': c5['low_idx'], 'close': c5['close_idx']
                         }, interval=5)
+
+                        for name in other_indices_hist:
+                            if prev_ts in other_5m[name].index:
+                                c5o = other_5m[name].loc[prev_ts]
+                                self.engines[name].update_candle(INDICES[name]['index_key'], {
+                                    'open': c5o[f'open_{name}'], 'high': c5o[f'high_{name}'],
+                                    'low': c5o[f'low_{name}'], 'close': c5o[f'close_{name}']
+                                }, interval=5)
 
                 # Identify Swings
                 swing_data = subset.rename(columns={'open_idx': 'open', 'high_idx': 'high', 'low_idx': 'low', 'close_idx': 'close'})
@@ -279,12 +294,16 @@ class Backtester:
                 if swing:
                     ce_key = details['ce']
                     pe_key = details['pe']
+                    # Correct Reference Level: Use the actual peak prices from the swing
+                    # Peak is expected at index -4 in identify_swing logic
+                    peak_candle = subset.iloc[-4]
+
                     self.strategy.save_reference_level(
                         swing['type'],
-                        current['close_idx'],
-                        current.get(f'close_{ce_key}', 0),
-                        current.get(f'close_{pe_key}', 0),
-                        ce_key, pe_key, timestamp=current_time
+                        swing['price'],
+                        peak_candle.get(f'close_{ce_key}', 0),
+                        peak_candle.get(f'close_{pe_key}', 0),
+                        ce_key, pe_key, timestamp=peak_candle['timestamp'].to_pydatetime().replace(tzinfo=None)
                     )
 
                 # Signals (Only if not warmup and within trade window)
@@ -344,7 +363,7 @@ class Backtester:
                                'oi_delta': current.get(f'oi_{entry_pe_key}', 0) - prev_oi_pe}
 
                     from types import SimpleNamespace
-                    if force_close or self.strategy.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data):
+                    if force_close or self.strategy.check_exit_condition(SimpleNamespace(**pos), idx_data, ce_data, pe_data, current_time=current_time):
                         exit_price = ce_data['ltp'] if pos['side'] == 'BUY_CE' else pe_data['ltp']
 
                         if exit_price > 0:

@@ -28,8 +28,8 @@ class StrategyEngine:
         self.reference_levels = {'High': None, 'Low': None}
         self.positions = []
         self.current_data = {} # instrument_key -> latest_data (tick)
-        self.candle_history = {} # instrument_key -> list of last 20 candle dicts
-        self.candle_history_5m = {} # instrument_key -> list of last 10 5m candles
+        self.candle_history = {} # instrument_key -> list of last 100 candle dicts
+        self.candle_history_5m = {} # instrument_key -> list of last 50 5m candles
         self.trailing_sl = {} # index_name -> current_sl_price
 
         # Strategy Parameters (can be overridden)
@@ -44,7 +44,7 @@ class StrategyEngine:
     def update_candle(self, instrument_key, candle, interval=1):
         """Update historical candle data."""
         target_history = self.candle_history if interval == 1 else self.candle_history_5m
-        limit = 20 if interval == 1 else 10
+        limit = 100 if interval == 1 else 50
 
         if instrument_key not in target_history:
             target_history[instrument_key] = []
@@ -214,11 +214,18 @@ class StrategyEngine:
         pp = history[-3]
         return c['low'] > p['low'] and pp['low'] > p['low']
 
-    def is_pullback_test(self, current_price, ref_price, tolerance=0.01):
-        """Checks if price is testing the reference level from above (Pullback)."""
+    def is_pullback_test(self, current_price, ref_price, side='Bullish', tolerance=0.005):
+        """
+        Checks if price is testing the reference level (Pullback).
+        More restrictive tolerance (0.5%) to ensure high-quality entry.
+        """
         if ref_price <= 0: return False
-        # Price is within 1% of ref_price but still above it
-        return ref_price <= current_price <= ref_price * (1 + tolerance)
+        if side == 'Bullish':
+            # Price returns to test the high from ABOVE
+            return ref_price <= current_price <= ref_price * (1 + tolerance)
+        else:
+            # Price returns to test the low from BELOW
+            return ref_price * (1 - tolerance) <= current_price <= ref_price
 
     def generate_signals(self, instruments):
         """
@@ -315,7 +322,11 @@ class StrategyEngine:
             details['active_opt_break'] = True
 
             # THE SQUEEZE: Option Lead detection (reward Speed over Validation)
-            if not details.get('index_break'):
+            # Require Index to be near the ref level to prevent totally random spikes
+            is_near_ref = (is_bull and current_idx_price >= ref_level['index_price'] * 0.999) or \
+                          (not is_bull and current_idx_price <= ref_level['index_price'] * 1.001)
+
+            if not details.get('index_break') and is_near_ref:
                 score += 1
                 details['option_leading'] = True
 
@@ -344,8 +355,10 @@ class StrategyEngine:
         # 5. The Panic (OI) - CRITICAL WEIGHTING
         active_oi_delta = float(active_opt_data.get('oi_delta', 0))
         opp_oi_delta = float(opp_opt_data.get('oi_delta', 0))
+        active_oi_total = float(active_opt_data.get('oi', 0))
 
-        if active_oi_delta < 0: # Sellers exiting (Short Covering in CE or Long Unwinding in PE)
+        # Require significant OI delta (>0.05% of total) to avoid noise
+        if active_oi_delta < 0 and (active_oi_total == 0 or abs(active_oi_delta) > active_oi_total * 0.0005):
             score += 2
             details['oi_panic'] = True
 
@@ -374,7 +387,7 @@ class StrategyEngine:
                           confluence_score=score, details=details)
         return None
 
-    def check_exit_condition(self, position, idx_data, ce_data, pe_data):
+    def check_exit_condition(self, position, idx_data, ce_data, pe_data, current_time=None):
         """
         Exit when the Opposite Option stops making new lows and its OI starts falling.
         Includes ATR-based dynamic trailing stop loss.
@@ -393,8 +406,8 @@ class StrategyEngine:
                 except: entry_time = None
 
             if entry_time:
-                # Assuming current data timestamp is also available or use now
-                now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+                # Use current_time (simulation) if provided, else use real time
+                now = current_time or datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
                 if (now - entry_time.replace(tzinfo=None)).total_seconds() > 900: # 15 mins
                     profit_pct = (active_opt_data['ltp'] - entry_price) / entry_price
                     if profit_pct < 0.01:
