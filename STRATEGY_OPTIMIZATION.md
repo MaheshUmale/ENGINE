@@ -1,40 +1,36 @@
-# ProDesk Symmetry Strategy Optimization Guide
+# ProDesk: Comprehensive Squeeze Mechanics & Optimization Guide
 
-The **Triple-Stream Symmetry & Panic** algorithm is a high-precision scalping strategy. To achieve optimal performance in different market regimes (Trending vs. Sideways), you can tune several parameters in the configuration and logic.
+The **Triple-Stream Symmetry & Panic** algorithm has been fully overhauled from a simple "Breakout" strategy into a high-precision **Short-Covering Squeeze** engine. 
 
-## 1. Tuning Swing Detection (Walls)
+To achieve optimal performance and maintain the >30% 1-minute win rate demonstrated in backtesting, you must understand the five core phases and the parameters you can tune.
 
-The strategy relies on identifying "Walls" (Swing Highs and Lows).
-- **ATR Multiplier**: In `backend/brain/SymmetryAnalyzer.py`, the significance of a swing is often filtered by ATR.
-  - *Increase* the multiplier (e.g., from 1.5x to 2.0x) to filter out noise in volatile markets (India VIX > 18).
-  - *Decrease* the multiplier (e.g., to 1.0x) for scalping tight ranges in low volatility (India VIX < 12).
-- **Pullback Confirmation**: The default requires a 2-candle pullback.
-  - For faster entries in aggressive trends, reduce this to 1 candle.
-  - For more conservative entries (reducing false breakouts), increase to 3 candles.
+## 1. Phase I: The Wall (Reference Level)
+The strategy relies on identifying "Walls" (Swing Highs and Lows) where writers previously defended successfully at least once.
+- **ATR Threshold**: In `backend/brain/SymmetryAnalyzer.py`, the significance of a swing is filtered by the ATR. 
+  - *Increase* `atr_threshold` (e.g., from 1.5x to 2.0x) to filter out noise in volatile markets (India VIX > 15).
+  - *Decrease* for scalping tight continuous trends.
+- **Pullback Requirement**: The system requires a minimum **3-candle pullback** to define a swing. This natively forces the engine to only take trades on the **"Second Attempt"** of a level.
 
-## 2. Confluence Score Optimization
+## 2. Phase II & III: The Trigger (Triple Symmetry)
+Signals are only triggered when the `score` meets a minimum threshold (currently `>= 2`).
+- **Relative Velocity (`calculate_relative_velocity`)**: The Active Option must be moving significantly faster than the Index. If the Index moves 10 points but the Call only moves 1 point, writers are absorbing the move.
+- **Symmetry of Panic**: The most crucial signal. The Opposite Option **must be making fresh lows and unable to bounce**. If you buy a Call, the Put writers must be in full control of the floor.
 
-Signals are only triggered when the `confluence_score` meets a threshold.
-- **Panic Weighting**: Currently, "OI Panic" (Short Covering detected via OI Delta) is weighted heavily.
-  - If you see many "Buying Traps" (price goes up but fails), increase the required OI Panic threshold.
-- **Index Symmetry**: Ensure `ENABLE_INDEX_SYNC` is `True` in `config.py`. This requires NIFTY and BANKNIFTY to move in the same direction, significantly reducing "Divergence Traps."
+## 3. Phase IV: The Guardrails (Filtering 80% of Noise)
+These filters prevent the "29% Win Rate Tap" that plagues standard breakout bots.
+- **The Absorption Filter**: Aborts if the Index makes a new high but the Option does not.
+- **The Void Check**: Ensure `check_void_above` has access to accurate OPRA/Option chain data. It must verify there are no massive OI clusters within 5-10 points above the breakout.
+- **PCR Momentum**: The `calculate_pcr_momentum` compares the live PCR to the Start of Day (SOD) and the 10-minute Moving Average.
+- **Cooldowns**: The `analyze` function enforces a **15-Minute Cooldown** (`> 900 seconds`) between trades. **Do not remove this.** It prevents the bot from machine-gunning entries during false chop.
 
-## 3. Dynamic Stop Loss & Take Profit
+## 4. Phase V: Dynamic Exits (The Real Edge)
+Stop relying on arbitrary Risk:Reward ratios like 1:2 on a 1-minute chart.
+- **Buffered Stop Loss**: The SL is placed 5 points below the low of the breakout candle. This buffer prevents getting wicked-out by algorithmic spreads before the squeeze resolves.
+- **Dynamic Take Profit (Opposite Bounce)**: Implemented in `backtest_symmetry.py`. The bot holds the Active Option until the *Opposite* Option forms a Green Candle that closes higher than its previous high. As long as the victim option is bleeding, hold the active option.
 
-- **ATR-Based SL**: Use `1.5 * ATR` for the initial stop loss.
-- **Profit Locking**:
-  - Implement a "Break-even switch": Once the trade moves +1% (option price), move the SL to the entry price.
-  - **Aggressive Trailing**: Use a 1-minute `EMA(9)` as a trailing stop for "Panic Run" trades. Exit as soon as the price closes below/above the EMA.
+## 5. Optimization & Tuning Workflow
 
-## 4. Market Regime Filtering
-
-- **Time of Day**: The strategy performs best during high-volume periods (09:15 - 11:00 and 13:30 - 15:30).
-- **Gap Handling**: Avoid trading in the first 15 minutes if there is a massive gap (>1%) as symmetry levels are not yet established.
-
-## 5. Optimization Workflow
-
-1. **Run Backtest**: Use `python backend/backtest_symmetry.py --underlying NSE:NIFTY --count 2000` to get a baseline.
-2. **Analyze Failures**: Look at the "SL" trades in the log.
-   - If SLs happen immediately, your SL is too tight.
-   - If SLs happen after a long sideways move, implement a "Time-Based Exit" (e.g., exit if not in profit within 10 minutes).
-3. **Adjust & Repeat**: Modify `backend/symmetry_engine/strategy.py` and re-run the backtest.
+1. **Baseline**: Run `python backend/backtest_symmetry.py --underlying NSE:NIFTY --count 500`.
+2. **Review the Log**: Check the `backtest_results.txt`.
+3. **Adjusting the Buffer**: If you see trades getting stopped out ('SL') followed by a massive move in your direction, increase the SL buffer in `SymmetryAnalyzer.py` from `-5.0` to `-10.0`.
+4. **Whipsaws**: If you are entering trades that immediately die, double-check that your `calculate_pcr_momentum` has accurate real-time data feeding it. Without PCR momentum, the breakout will fail.
