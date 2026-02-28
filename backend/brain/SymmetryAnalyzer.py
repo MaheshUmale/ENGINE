@@ -33,6 +33,7 @@ class SymmetryAnalyzer:
         """
         self.underlying = underlying
         self.reference_levels = {'High': None, 'Low': None}
+        self.pullback_floor = {'High': None, 'Low': None}
         self.swing_window = 15
         self.confluence_threshold = 3
 
@@ -220,11 +221,21 @@ class SymmetryAnalyzer:
                     'type': l_type,
                     'time': int(peak_data['ts'])
                 }
+                self.pullback_floor[l_type] = None # Reset floor for new swing
                 logger.info(f"New Reference {l_type} set at {peak_data['ts']}: Index={self.reference_levels[l_type]['index_price']}")
 
             # 2. Check for Signals
             ref_high = self.reference_levels.get('High')
             ref_low = self.reference_levels.get('Low')
+
+            # Track Pullback Floor
+            if ref_high and current['c_idx'] < ref_high['index_price']:
+                if self.pullback_floor['High'] is None or current['c_ce'] < self.pullback_floor['High']:
+                    self.pullback_floor['High'] = float(current['c_ce'])
+
+            if ref_low and current['c_idx'] > ref_low['index_price']:
+                if self.pullback_floor['Low'] is None or current['c_pe'] < self.pullback_floor['Low']:
+                    self.pullback_floor['Low'] = float(current['c_pe'])
 
             # --- Bullish Trigger (Call Buy) ---
             if ref_high:
@@ -244,7 +255,11 @@ class SymmetryAnalyzer:
 
                 # 2. CE Symmetry: ATM Call breaks above Ref_High_CE
                 if current['c_ce'] > ref_high['ce_price']:
-                    score += 1
+                    if not details.get('index_break'):
+                        score += 2 # Option leads Index (High Quality)
+                        details['the_squeeze'] = True
+                    else:
+                        score += 1
                     details['ce_break'] = True
 
                     # THE SQUEEZE: Option Leads Index
@@ -277,21 +292,27 @@ class SymmetryAnalyzer:
                     score += 1
                     details['decay_divergence'] = True
 
+                # 6. Higher Low (Pullback Entry)
+                if self.pullback_floor['High'] and current['c_ce'] > self.pullback_floor['High'] * 1.02:
+                    if prev['c_ce'] <= self.pullback_floor['High'] * 1.01: # Just started rising
+                        score += 1
+                        details['higher_low'] = True
+
                 if score >= self.confluence_threshold and ts not in seen_timestamps:
                     # Guardrail: Absorption check (Index high but CE rejected)
-                    if not (current['c_idx'] > prev['c_idx'] and current['c_ce'] <= prev['c_ce']):
-                        # Dynamic ATR-based SL (2.0 * ATR) - Use subset to avoid look-ahead bias
-                        atr_ce = self.calculate_atr(ce_df.iloc[:i+1], window=14) if i >= 15 else 5.0
-                        entry_p = float(current['c_ce'])
-                        sl_p = entry_p - (2.0 * atr_ce) if atr_ce > 0 else entry_p * 0.90
-
+                    if current['c_idx'] > prev['c_idx'] and current['c_ce'] <= prev['c_ce']:
+                        logger.warning(f"BUY_CE rejected due to Absorption at {ts}")
+                    else:
+                        entry_price = float(current['c_ce'])
+                        # SL at pullback floor or tight 5% from entry
+                        sl = self.pullback_floor['High'] if self.pullback_floor['High'] else entry_price * 0.95
                         signals.append({
                             'time': ts,
                             'type': 'BUY_CE',
                             'score': score,
-                            'price': entry_p,
-                            'sl': sl_p,
-                            'tp': entry_p + (entry_p - sl_p) * 2.0, # 2:1 RR
+                            'price': entry_price,
+                            'sl': float(sl),
+                            'tp': float(entry_price + (entry_price - sl) * 2.5),
                             'details': details
                         })
                         seen_timestamps.add(ts)
@@ -314,7 +335,11 @@ class SymmetryAnalyzer:
 
                 # 2. PE Symmetry: ATM Put breaks above Ref_High_PE
                 if current['c_pe'] > ref_low['pe_price']:
-                    score += 1
+                    if not details.get('index_break'):
+                        score += 2 # Option leads Index (High Quality)
+                        details['the_squeeze'] = True
+                    else:
+                        score += 1
                     details['pe_break'] = True
 
                     # THE SQUEEZE: Option Leads Index
@@ -348,21 +373,26 @@ class SymmetryAnalyzer:
                     score += 1
                     details['decay_divergence'] = True
 
+                # 6. Higher Low (Pullback Entry)
+                if self.pullback_floor['Low'] and current['c_pe'] > self.pullback_floor['Low'] * 1.02:
+                    if prev['c_pe'] <= self.pullback_floor['Low'] * 1.01:
+                        score += 1
+                        details['higher_low'] = True
+
                 if score >= self.confluence_threshold and ts not in seen_timestamps:
                     # Guardrail: Absorption check (Index low but PE rejected)
-                    if not (current['c_idx'] < prev['c_idx'] and current['c_pe'] <= prev['c_pe']):
-                        # Dynamic ATR-based SL (2.0 * ATR) - Use subset to avoid look-ahead bias
-                        atr_pe = self.calculate_atr(pe_df.iloc[:i+1], window=14) if i >= 15 else 5.0
-                        entry_p = float(current['c_pe'])
-                        sl_p = entry_p - (2.0 * atr_pe) if atr_pe > 0 else entry_p * 0.90
-
+                    if current['c_idx'] < prev['c_idx'] and current['c_pe'] <= prev['c_pe']:
+                        logger.warning(f"BUY_PE rejected due to Absorption at {ts}")
+                    else:
+                        entry_price = float(current['c_pe'])
+                        sl = self.pullback_floor['Low'] if self.pullback_floor['Low'] else entry_price * 0.95
                         signals.append({
                             'time': ts,
                             'type': 'BUY_PE',
                             'score': score,
-                            'price': entry_p,
-                            'sl': sl_p,
-                            'tp': entry_p + (entry_p - sl_p) * 2.0, # 2:1 RR
+                            'price': entry_price,
+                            'sl': float(sl),
+                            'tp': float(entry_price + (entry_price - sl) * 2.5),
                             'details': details
                         })
                         seen_timestamps.add(ts)
