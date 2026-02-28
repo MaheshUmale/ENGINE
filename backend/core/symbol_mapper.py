@@ -204,34 +204,57 @@ class SymbolMapper:
         return key.replace(':', '|')
 
     def to_tv_symbol(self, internal_key: str) -> str:
-        """Translates internal key to TradingView symbol (e.g. NSE:NIFTY)."""
+        """
+        Translates internal key or Upstox technical key to TradingView symbol (e.g. NSE:NIFTY).
+        Uses database metadata for accurate resolution of numeric/technical keys.
+        """
         if not internal_key: return ""
 
-        # Mapping for Indices
+        # Standardize key for lookup/comparison
+        key = internal_key.upper().replace(':', '|')
+
+        # 1. Fast path for Indices
         index_map = {
             "NIFTY": "NSE:NIFTY",
+            "NIFTY 50": "NSE:NIFTY",
             "BANKNIFTY": "NSE:BANKNIFTY",
+            "NIFTY BANK": "NSE:BANKNIFTY",
             "INDIA VIX": "NSE:INDIAVIX",
             "INDIAVIX": "NSE:INDIAVIX",
             "SENSEX": "BSE:SENSEX"
         }
 
-        key = internal_key.upper().replace('|', ':')
-        no_prefix = key.split(':')[-1]
+        base_symbol = key.split('|')[-1]
+        if base_symbol in index_map:
+            return index_map[base_symbol]
 
-        if no_prefix in index_map:
-            return index_map[no_prefix]
+        # 2. Database Lookup for technical/numeric keys (e.g., NSE_FO|54910)
+        try:
+            # Try original key and standardized key
+            for k in [internal_key, key, key.replace('|', ':')]:
+                res = db.get_metadata(k)
+                if res and res.get('metadata'):
+                    meta = res['metadata']
+                    tsym = meta.get('trading_symbol')
+                    if tsym:
+                        exch = meta.get('exchange', 'NSE')
+                        # TradingView uses 'NSE' for both NSE and NFO segments
+                        tv_exch = 'NSE' if exch in ['NSE', 'NFO'] else 'BSE' if exch in ['BSE', 'BFO'] else exch
+                        return f"{tv_exch}:{tsym}"
+        except Exception as e:
+            logger.debug(f"TV symbol resolution DB lookup failed: {e}")
 
-        if "NIFTY BANK" in key or "BANKNIFTY" in key:
-            return "NSE:BANKNIFTY"
-        if "NIFTY" in key:
-            return "NSE:NIFTY"
+        # 3. Heuristic fallbacks if DB lookup fails
+        if "BANKNIFTY" in key: return "NSE:BANKNIFTY"
+        if "NIFTY" in key: return "NSE:NIFTY"
 
-        # If it's already prefixed, return as is
-        if ':' in key:
-            return key
+        # If it already looks like a TV symbol, return it
+        if ':' in internal_key and not internal_key.startswith('NSE_'):
+            return internal_key.upper()
 
-        return f"NSE:{key}"
+        # Last resort: Strip prefix and assume NSE
+        clean_sym = key.split('|')[-1]
+        return f"NSE:{clean_sym}"
 
     def from_upstox_key(self, upstox_key: str) -> str:
         """Translates Upstox key to internal canonical symbol."""
