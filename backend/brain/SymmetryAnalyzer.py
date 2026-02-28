@@ -37,6 +37,25 @@ class SymmetryAnalyzer:
         self.swing_window = 15
         self.confluence_threshold = 3
 
+    def calculate_atr(self, df, window=14, prefix=''):
+        """Calculates Average True Range."""
+        if len(df) < window + 1: return 0
+        df = df.copy()
+        h_col = f'h{prefix}'
+        l_col = f'l{prefix}'
+        c_col = f'c{prefix}'
+
+        # Check if column exists, fallback to standard if not found
+        if h_col not in df.columns: h_col = 'h'
+        if l_col not in df.columns: l_col = 'l'
+        if c_col not in df.columns: c_col = 'c'
+
+        df['h-l'] = df[h_col] - df[l_col]
+        df['h-pc'] = abs(df[h_col] - df[c_col].shift(1))
+        df['l-pc'] = abs(df[l_col] - df[c_col].shift(1))
+        df['tr'] = df[['h-l', 'h-pc', 'l-pc']].max(axis=1)
+        return df['tr'].tail(window).mean()
+
     def identify_swing(self, subset_df):
         """
         Identify Significant Swings (Walls) where the market pivoted.
@@ -44,34 +63,42 @@ class SymmetryAnalyzer:
         A 'Wall' is a structural support or resistance level identified after
         a move and a subsequent pullback. This forms the baseline for symmetry detection.
         We look for a local peak (High) or trough (Low) and ensure there is a
-        pullback confirmation from the subsequent candle.
+        pullback confirmation.
 
-        Args:
-            subset_df (pd.DataFrame): DataFrame containing 'h_idx' (high), 'l_idx' (low),
-                                      'c_ce' (call close), 'c_pe' (put close), and 'ts' (timestamp).
-
-        Returns:
-            dict: {type: 'High'|'Low', data: Series} representing the peak/trough candle, or None.
+        Expert Optimization:
+        - Requires move magnitude > 1.5 * ATR to filter noise.
+        - Requires 3-candle pullback confirmation.
         """
-        if len(subset_df) < 3:
+        if len(subset_df) < 15: return None
+
+        # Calculate ATR
+        atr = self.calculate_atr(subset_df, prefix='_idx')
+        atr_threshold = atr * 1.5 if atr > 0 else 5.0
+
+        # Last few candles for pullback check
+        c = subset_df.iloc[-1]
+        p = subset_df.iloc[-2]
+        pp = subset_df.iloc[-3]
+        ppp = subset_df.iloc[-4] # Potential Peak
+
+        last_n = subset_df.tail(15)
+        current_high = last_n['h_idx'].max()
+        current_low = last_n['l_idx'].min()
+
+        # Magnitude check
+        window_start_price = last_n.iloc[0]['o_idx']
+        if abs(current_high - window_start_price) < atr_threshold and abs(current_low - window_start_price) < atr_threshold:
             return None
 
-        # Simple swing detection: local high/low in the window
-        last_n = subset_df.tail(self.swing_window)
+        # Bullish Wall (High) with 3-candle pullback
+        if ppp['h_idx'] == current_high:
+            if pp['h_idx'] < ppp['h_idx'] and p['h_idx'] < pp['h_idx'] and c['h_idx'] < p['h_idx']:
+                return {'type': 'High', 'data': ppp}
 
-        # We look for a peak that is NOT the very last candle (because we need a pullback)
-        # Peak is at index -2
-        last_candle = subset_df.iloc[-1]
-        prev_candle = subset_df.iloc[-2]
-        prev_prev = subset_df.iloc[-3]
-
-        # Bullish Wall (High)
-        if prev_candle['h_idx'] > prev_prev['h_idx'] and prev_candle['h_idx'] > last_candle['h_idx']:
-            return {'type': 'High', 'data': prev_candle}
-
-        # Bearish Wall (Low)
-        if prev_candle['l_idx'] < prev_prev['l_idx'] and prev_candle['l_idx'] < last_candle['l_idx']:
-            return {'type': 'Low', 'data': prev_candle}
+        # Bearish Wall (Low) with 3-candle pullback
+        if ppp['l_idx'] == current_low:
+            if pp['l_idx'] > ppp['l_idx'] and p['l_idx'] > pp['l_idx'] and c['l_idx'] > p['l_idx']:
+                return {'type': 'Low', 'data': ppp}
 
         return None
 
@@ -106,6 +133,21 @@ class SymmetryAnalyzer:
                 if current_opt_price > ref_level['pe_price']:
                     return True
         return False
+
+    def is_higher_low(self, df, col='c_ce'):
+        """Detects if the last 3 candles formed a Higher Low."""
+        if len(df) < 3: return False
+        c = df.iloc[-1]
+        p = df.iloc[-2]
+        pp = df.iloc[-3]
+        # Using low for HL detection
+        low_col = col.replace('c_', 'l_')
+        return c[low_col] > p[low_col] and pp[low_col] > p[low_col]
+
+    def is_pullback_test(self, current_price, ref_price, tolerance=0.01):
+        """Checks if price is testing the reference level from above."""
+        if ref_price <= 0: return False
+        return ref_price <= current_price <= ref_price * (1 + tolerance)
 
     def analyze(self, idx_candles, ce_candles, pe_candles, oi_data=None):
         """
@@ -200,6 +242,12 @@ class SymmetryAnalyzer:
                 score = 0
                 details = {}
 
+                # 0. Volume Confirmation
+                avg_vol = idx_df['v'].iloc[i-10:i].mean() if i >= 10 else 0
+                if current['v_idx'] > avg_vol and avg_vol > 0:
+                    score += 1
+                    details['volume_confirmation'] = True
+
                 # 1. Index: Crosses above Ref_High_Index
                 if current['c_idx'] > ref_high['index_price']:
                     score += 1
@@ -213,6 +261,19 @@ class SymmetryAnalyzer:
                     else:
                         score += 1
                     details['ce_break'] = True
+
+                    # THE SQUEEZE: Option Leads Index
+                    if not details.get('index_break'):
+                        score += 1
+                        details['option_leading'] = True
+
+                # PULLBACK: Higher Low or Test
+                if self.is_higher_low(subset, 'c_ce'):
+                    score += 1
+                    details['higher_low'] = True
+                if self.is_pullback_test(current['c_ce'], ref_high['ce_price']):
+                    score += 1
+                    details['pullback_test'] = True
 
                 # 3. PE Symmetry: ATM Put breaks below its own local low at peak
                 if current['c_pe'] < ref_high['pe_price']:
@@ -261,12 +322,18 @@ class SymmetryAnalyzer:
                 score = 0
                 details = {}
 
+                # 0. Volume Confirmation
+                avg_vol = idx_df['v'].iloc[i-10:i].mean() if i >= 10 else 0
+                if current['v_idx'] > avg_vol and avg_vol > 0:
+                    score += 1
+                    details['volume_confirmation'] = True
+
                 # 1. Index: Crosses below Ref_Low_Index
                 if current['c_idx'] < ref_low['index_price']:
                     score += 1
                     details['index_break'] = True
 
-                # 2. PE Symmetry: ATM Put breaks above Ref_High_PE (which was local high at support)
+                # 2. PE Symmetry: ATM Put breaks above Ref_High_PE
                 if current['c_pe'] > ref_low['pe_price']:
                     if not details.get('index_break'):
                         score += 2 # Option leads Index (High Quality)
@@ -274,6 +341,19 @@ class SymmetryAnalyzer:
                     else:
                         score += 1
                     details['pe_break'] = True
+
+                    # THE SQUEEZE: Option Leads Index
+                    if not details.get('index_break'):
+                        score += 1
+                        details['option_leading'] = True
+
+                # PULLBACK: Higher Low or Test
+                if self.is_higher_low(subset, 'c_pe'):
+                    score += 1
+                    details['higher_low'] = True
+                if self.is_pullback_test(current['c_pe'], ref_low['pe_price']):
+                    score += 1
+                    details['pullback_test'] = True
 
                 # 3. CE Symmetry: ATM Call breaks below Ref_Low_CE
                 if current['c_ce'] < ref_low['ce_price']:
