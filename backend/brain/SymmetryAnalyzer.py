@@ -40,11 +40,14 @@ class SymmetryAnalyzer:
         """
         Identify Significant Swings (Walls) where the market pivoted.
 
-        A 'Wall' is defined when the Index hits a new high (or low) in the current
-        window and subsequently pulls back.
+        A 'Wall' is a structural support or resistance level identified after
+        a move and a subsequent pullback. This forms the baseline for symmetry detection.
+        We look for a local peak (High) or trough (Low) and ensure there is a
+        pullback confirmation from the subsequent candle.
 
         Args:
-            subset_df (pd.DataFrame): DataFrame containing 'h_idx', 'l_idx', and 'ts' columns.
+            subset_df (pd.DataFrame): DataFrame containing 'h_idx' (high), 'l_idx' (low),
+                                      'c_ce' (call close), 'c_pe' (put close), and 'ts' (timestamp).
 
         Returns:
             dict: {type: 'High'|'Low', data: Series} representing the peak/trough candle, or None.
@@ -71,40 +74,63 @@ class SymmetryAnalyzer:
 
         return None
 
-    def check_decay_filter(self, current_index_price, current_ce_price, ref_level):
+    def check_decay_filter(self, current_index_price, current_opt_price, ref_level):
         """
         Phase II: Pullback & Decay Filter (Anti-Theta).
 
-        Determines if the Call Option is showing 'Relative Strength' despite time decay.
-        If the Index returns to a previous Reference High, but the Call price is
-        now higher than it was at that peak, it indicates aggressive institutional buying.
+        Determines if the Option (CE or PE) is showing 'Relative Strength' despite time decay.
+        If the Index returns to a previous Reference Level (High or Low), but the corresponding
+        Option price is now higher than it was at that peak/trough, it indicates
+        aggressive institutional buying.
 
         Args:
             current_index_price (float): Current Index Spot price.
-            current_ce_price (float): Current ATM Call price.
-            ref_level (dict): The active Reference High level.
+            current_opt_price (float): Current ATM Option price (CE or PE).
+            ref_level (dict): The active Reference level (High or Low).
 
         Returns:
-            bool: True if Bullish Divergence is detected.
+            bool: True if Symmetry Panic Divergence is detected.
         """
-        if not ref_level or ref_level['type'] != 'High':
+        if not ref_level:
             return False
 
-        if current_index_price >= ref_level['index_price']:
-            if current_ce_price > ref_level['ce_price']:
-                return True # Bullish Divergence
+        if ref_level['type'] == 'High':
+            # Bullish Case (BUY_CE): Index near high, CE should be higher than before
+            if current_index_price >= ref_level['index_price'] - 2:
+                if current_opt_price > ref_level['ce_price']:
+                    return True
+        elif ref_level['type'] == 'Low':
+            # Bearish Case (BUY_PE): Index near low, PE should be higher than before
+            if current_index_price <= ref_level['index_price'] + 2:
+                if current_opt_price > ref_level['pe_price']:
+                    return True
         return False
 
     def analyze(self, idx_candles, ce_candles, pe_candles, oi_data=None):
         """
-        Phase III: Triple-Symmetry Execution & Phase IV: Guardrails.
+        Main analysis loop that processes historical candles to generate backtest signals.
+        Implements Phase III (Execution) and Phase IV (Guardrails) of the strategy.
 
-        Generates trading signals by verifying that the Index, Call, and Put
-        instruments are moving in synchronized 'Symmetry'.
+        Execution Logic (Triple-Stream Symmetry):
 
-        Execution Logic:
-        - BUY_CE: Index > Ref_High AND CE > Ref_High_CE AND PE < Ref_Low_PE AND OI_Panic.
-        - BUY_PE: Index < Ref_Low AND PE > Ref_High_PE AND CE < Ref_Low_CE AND OI_Panic.
+        The strategy enters a trade when three independent data streams (Index, CE, PE)
+        confirm the exhaustion of the 'Wall' and the formation of a 'Void'.
+
+        BUY_CE (Bullish Entry):
+            - Index Break: Spot price exceeds the previous significant high.
+            - Active Break: Call option price exceeds its value at the previous index high.
+            - Opposite Breakdown: Put option price falls below its value at the previous index high.
+            - OI Panic: Significant drop in CE OI (Short Covering) + rise in PE OI (Writing).
+            - Decay Divergence: CE price stays high or rises even if the Index pulls back slightly.
+            - Absorption Guardrail: Ensures the Call option is actually following the Index move.
+
+        BUY_PE (Bearish Entry):
+            - Index Breakdown: Spot price falls below the previous significant low.
+            - Active Breakout: Put option price exceeds its value at the previous index low.
+            - Opposite Breakdown: Call option price falls below its value at the previous index low.
+            - OI Panic: Significant drop in PE OI (Short Covering) + rise in CE OI (Writing).
+            - Decay Divergence: PE price stays high or rises even if the Index pulls back slightly.
+            - Absorption Guardrail: Ensures the Put option is actually following the Index move.
 
         Args:
             idx_candles (list): List of Index candles [ts, o, h, l, c, v].
@@ -209,28 +235,46 @@ class SymmetryAnalyzer:
                 score = 0
                 details = {}
 
+                # 1. Index: Crosses below Ref_Low_Index
                 if current['c_idx'] < ref_low['index_price']:
                     score += 1
                     details['index_break'] = True
 
+                # 2. PE Symmetry: ATM Put breaks above Ref_High_PE (which was local high at support)
                 if current['c_pe'] > ref_low['pe_price']:
                     score += 1
                     details['pe_break'] = True
 
+                # 3. CE Symmetry: ATM Call breaks below Ref_Low_CE
                 if current['c_ce'] < ref_low['ce_price']:
                     score += 1
                     details['ce_breakdown'] = True
 
+                # 4. OI Panic (if available)
+                if oi_data and ts in oi_data:
+                    d = oi_data[ts]
+                    # PE Sellers exiting (Panic/Short Covering) and CE Buyers entering (Opposite Writing)
+                    if d.get('pe_oi_chg', 0) < 0 and d.get('ce_oi_chg', 0) > 0:
+                        score += 1
+                        details['oi_panic'] = True
+
+                # 5. Decay Filter
+                if self.check_decay_filter(current['c_idx'], current['c_pe'], ref_low):
+                    score += 1
+                    details['decay_divergence'] = True
+
                 if score >= self.confluence_threshold and ts not in seen_timestamps:
-                    signals.append({
-                        'time': ts,
-                        'type': 'BUY_PE',
-                        'score': score,
-                        'price': float(current['c_pe']),
-                        'sl': float(ref_low['pe_price'] * 0.90),
-                        'tp': float(current['c_pe'] + (current['c_pe'] - ref_low['pe_price']) * 2.5),
-                        'details': details
-                    })
-                    seen_timestamps.add(ts)
+                    # Guardrail: Absorption check (Index low but PE rejected)
+                    if not (current['c_idx'] < prev['c_idx'] and current['c_pe'] <= prev['c_pe']):
+                        signals.append({
+                            'time': ts,
+                            'type': 'BUY_PE',
+                            'score': score,
+                            'price': float(current['c_pe']),
+                            'sl': float(ref_low['pe_price'] * 0.90),
+                            'tp': float(current['c_pe'] + (current['c_pe'] - ref_low['pe_price']) * 2.5),
+                            'details': details
+                        })
+                        seen_timestamps.add(ts)
 
         return signals
