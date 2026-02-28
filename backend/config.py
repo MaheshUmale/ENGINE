@@ -23,7 +23,7 @@ LOGGING_CONFIG = {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "default",
-            "level": "INFO"
+            "level": "WARNING"
         },
         "file": {
             "class": "logging.FileHandler",
@@ -33,7 +33,7 @@ LOGGING_CONFIG = {
         }
     },
     "root": {
-        "level": "INFO",
+        "level": "WARNING",
         "handlers": ["console", "file"]
     }
 }
