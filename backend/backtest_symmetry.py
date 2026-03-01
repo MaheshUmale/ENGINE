@@ -91,6 +91,7 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500, return_j
         side = sig['type']
         entry_price = sig['price']
         initial_sl = sig['sl']
+        target_tp = sig.get('tp', entry_price * 1.1)
         ts = sig['time']
         atr_val = sig.get('atr', 20.0) # Assume 20pt ATR if missing
         # The active option is what we bought. The opposite option is what we monitor for exit.
@@ -124,7 +125,8 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500, return_j
             # SL Condition: "Stop Loss: Exit immediately if Symmetry Fails. "
             if act_row['l'] <= initial_sl:
                 outcome = "SL"
-                exit_price = initial_sl
+                # Slippage Simulation: Exit slightly worse than SL
+                exit_price = initial_sl * 0.998
                 exit_time = act_row['ts']
                 break
                 
@@ -136,13 +138,17 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500, return_j
                 exit_time = act_row['ts']
                 break
                 
-            # Asymmetry Absorption Exit: Relaxed to 5 minutes of trap
-            if idx_row['h'] > entry_idx_high and act_row['h'] < entry_opt_high:
+            # Asymmetry Absorption Exit: Relaxed even more for BANKNIFTY
+            is_trap = (idx_row['h'] > entry_idx_high and act_row['h'] < entry_opt_high) if side == 'BUY_CE' else \
+                      (idx_row['l'] < entry_idx_high and act_row['h'] < entry_opt_high) # Fix for PE trap detection
+
+            if is_trap:
                 asym_trap_count += 1
             else:
-                asym_trap_count = max(0, asym_trap_count - 1) # decay the count
+                asym_trap_count = max(0, asym_trap_count - 1)
                 
-            if asym_trap_count >= 5:
+            trap_limit = 10 if "BANK" in underlying else 5
+            if asym_trap_count >= trap_limit:
                 outcome = "ASYMMETRY_EXIT"
                 exit_price = act_row['c']
                 exit_time = act_row['ts']
@@ -151,16 +157,14 @@ async def run_backtest(underlying="NSE:NIFTY", interval='1', count=500, return_j
             # Dynamic TP Condition: Exit when Opposite Option starts to bounce.
             if i > 2: # Require at least 3 minutes
                 opp_prev_row = opp_df.iloc[i-1]
-                opp_prev_2_row = opp_df.iloc[i-2]
                 
-                # Stronger bounce required: 2 consecutive higher highs and higher closes
-                bouncing = (opp_row['c'] > opp_row['o']) and \
-                           (opp_row['c'] > opp_prev_row['h']) and \
-                           (opp_prev_row['c'] > opp_prev_2_row['h'])
+                # RELAXED BOUNCE for scalping: Close > Previous High
+                bouncing = (opp_row['c'] > opp_prev_row['h'])
                            
-                if bouncing and current_pnl_pct > 2.0: # Ensure we are in profit or flat before taking dynamic TP
+                if bouncing and current_pnl_pct > 2.5: # Only take dynamic TP if target nearly reached
                     outcome = "DYNAMIC_TP"
-                    exit_price = act_row['c'] # Exit active side at market close of this minute
+                    # Slippage simulation for exit
+                    exit_price = act_row['c'] * 0.999
                     exit_time = act_row['ts']
                     break
 

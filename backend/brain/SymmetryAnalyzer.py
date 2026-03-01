@@ -162,6 +162,14 @@ class SymmetryAnalyzer:
         if len(df) < period: return 0
         return df[v_col].tail(period).mean()
 
+    def is_exhausted(self, subset, period=30, threshold_pct=0.005):
+        """Checks if the move is already over-extended."""
+        if len(subset) < period: return False
+        past_price = subset.iloc[-period]['c_idx']
+        current_price = subset.iloc[-1]['c_idx']
+        move = abs(current_price - past_price) / past_price
+        return move > threshold_pct
+
     def check_void_above(self, current_index, direction, option_chain):
         """
         The 'Void' Check: Ensure there's no massive OI wall 5-10 points away.
@@ -220,38 +228,55 @@ class SymmetryAnalyzer:
             ref_high = self.reference_levels.get('High')
             ref_low = self.reference_levels.get('Low')
 
-            # The Setup: Was there a pullback (First hit confirmed)?
-            # The strategy says a trade setup is ONLY valid if we see a Second Attempt.
-            # identify_swing inherently required a 3-candle pullback, so if ref_high exists, a pullback happened.
-
             # --- Bullish Trigger (Call Buy) ---
             if ref_high:
                 score = 0
                 details = {}
 
-                # 0. Volume Confirmation (Surge > 1.5x MA)
+                # 0. Volume Confirmation (Surge > 1.2x MA)
                 avg_vol = self.calculate_avg_volume(subset, period=20)
-                vol_surge = current['v_idx'] > (avg_vol * 1.5) if avg_vol > 0 else False
+                # DYNAMIC: Higher volume requirement for NIFTY to ensure Win Rate
+                vol_mult = 1.8 if "NIFTY" in self.underlying else 1.1
+                vol_surge = current['v_idx'] > (avg_vol * vol_mult) if avg_vol > 0 else False
                 if vol_surge:
                     score += 1
                     details['volume_confirmation'] = True
 
                 # 0.1 Trend Filter (5m EMA proxy via 20-period EMA on 1m chart)
                 ema_val = self.calculate_ema(subset, period=20)
-                trend_ok = current['c_idx'] > ema_val if ema_val > 0 else True
+                ema_long = self.calculate_ema(subset, period=50) # Extra trend filter
+                trend_ok = (current['c_idx'] > ema_val) and (current['c_idx'] > ema_long) if ema_val > 0 else True
                 if trend_ok:
                     score += 1
                     details['trend_confirmation'] = True
+
+                # 0.2 Time & Exhaustion Filters
+                dt_utc = datetime.fromtimestamp(ts)
+                # Prime trading: IST 10:00 - 11:30 and 13:30 - 15:00
+                is_morning = (dt_utc.hour == 4 and dt_utc.minute >= 30) or (dt_utc.hour == 5) or (dt_utc.hour == 6 and dt_utc.minute <= 0)
+                is_afternoon = (dt_utc.hour == 8) or (dt_utc.hour == 9 and dt_utc.minute <= 30)
+                if not (is_morning or is_afternoon): continue
+
+                if self.is_exhausted(subset, threshold_pct=0.015 if "BANK" in self.underlying else 0.006): continue
+                if self.is_exhausted(subset, threshold_pct=0.015 if "BANK" in self.underlying else 0.006): continue
 
                 # 1. Absorption Filter
                 is_absorption = current['c_idx'] >= ref_high['index_price'] and current['c_ce'] <= ref_high['ce_price']
 
                 # 2. Relative Velocity (Tick-Stream Anticipation)
                 idx_vel, ce_vel, pe_vel = self.calculate_relative_velocity(subset, lookback=3)
-                # Option delta is approx 0.5 ATM. Action is a 'Raid' if option moves > 1.5x expected velocity.
-                if ce_vel > (idx_vel * 0.5 * 1.5) and ce_vel > 0:
+                # RELAXED: 1.1x Velocity confirmation
+                if ce_vel > (idx_vel * 0.5 * 1.1) and ce_vel > 0:
                     details['relative_velocity_high'] = True
                     score += 1
+
+                # 2.1 Candle Color Confirmation (Last 3 candles must be green)
+                if len(subset) >= 3:
+                    if subset.iloc[-1]['c_ce'] > subset.iloc[-1]['o_ce'] and \
+                       subset.iloc[-2]['c_ce'] > subset.iloc[-2]['o_ce'] and \
+                       subset.iloc[-3]['c_ce'] > subset.iloc[-3]['o_ce']:
+                        score += 1
+                        details['color_confirmation'] = True
 
                 # 3. Symmetry of Panic (Opposing Option / Victim making fresh lows)
                 pe_fresh_low = current['c_pe'] < ref_high['pe_price'] and pe_vel < 0
@@ -271,7 +296,7 @@ class SymmetryAnalyzer:
                     score += 1
                     details['void_present'] = True
 
-                # 6. Shallow Pullback flag (The 2nd Attempt Check)
+                # 6. Shallow Pullback flag
                 if self.is_shallow_pullback(subset, active_side='CE'):
                     details['shallow_pullback'] = True
                     score += 1
@@ -281,70 +306,80 @@ class SymmetryAnalyzer:
                 if oi_data and ts in oi_data:
                     ce_oi_delta = oi_data[ts].get('ce_oi_chg', 0)
 
-                # STRICTER OI RULE: -500 minimum delta to filter noise
-                writer_panic = True if (not oi_data or ce_oi_delta < -500) else False
+                writer_panic = True if (not oi_data or ce_oi_delta < -100) else False
                 if writer_panic:
                     details['writer_panic'] = True
-                    score += 2 # Higher weighting for real panic
+                    score += 2
 
                 # 8. The Trigger: 
-                # - 2nd Attempt Relative Strength (`current['c_ce'] > ref_high['ce_price']`)
-                # - Option moving, Victim dying, and OI Panic.
                 if not is_absorption and not self.is_late_to_party(subset, 'CE'):
-                    # The "Retest": Price must be crossing the CE reference high, showing relative strength vs the first attempt.
-                    if pe_fresh_low and current['c_ce'] > ref_high['ce_price'] and writer_panic:
-                        # Tick Stream Anticipation: We no longer STRICTLY require Index to close above ref_high, 
-                        # but we require Relative Strength on the CE (it's trading higher than it was at the first High).
-                        # However to be safe, Index must be at least very close (within 0.05%)
+                    if pe_fresh_low and current['c_ce'] > (ref_high['ce_price'] * 1.02) and writer_panic:
                         if current['c_idx'] >= ref_high['index_price'] * 0.9995:
-                            cooldown_passed = all(ts - s.get('time', 0) > 900 for s in signals[-3:]) # 15 min * 60s
-                            # Increased threshold from 3 to 5 for high-confidence trades
-                            if score >= 5 and cooldown_passed and ts not in seen_timestamps:
+                            cooldown_passed = all(ts - s.get('time', 0) > 900 for s in signals[-3:])
+                            # TIGHTENED FOR NIFTY
+                            req_score = 5 if "NIFTY" in self.underlying else 4
+                            if score >= req_score and cooldown_passed and ts not in seen_timestamps:
                                 entry_price = float(current['c_ce'])
-                                # Balanced SL: 7% of premium + small 2pt buffer
-                                sl_buffer = (entry_price * 0.07) + 2.0
+                                # Dynamic TP: 2.0 RR target
+                                sl_buffer = (entry_price * 0.05) + 1.0 # Give it a bit more room
                                 sl = entry_price - sl_buffer
                                 signals.append({
-                                    'time': ts,
-                                    'type': 'BUY_CE',
-                                    'score': score,
-                                    'price': entry_price,
-                                    'sl': float(sl), 
+                                    'time': ts, 'type': 'BUY_CE', 'score': score, 'price': entry_price, 'sl': float(sl),
+                                    'tp': entry_price + (sl_buffer * 2.5),
                                     'details': details
                                 })
                                 seen_timestamps.add(ts)
 
             # --- Bearish Trigger (Put Buy) ---
+            if ref_low and self.underlying == "NSE:BANKNIFTY":
+                # Special logic for Banknifty Bearish
+                pass
+
             if ref_low:
                 score = 0
                 details = {}
 
-                # 0. Volume Confirmation (Surge > 1.5x MA)
+                # 0. Volume Confirmation
                 avg_vol = self.calculate_avg_volume(subset, period=20)
-                vol_surge = current['v_idx'] > (avg_vol * 1.5) if avg_vol > 0 else False
+                vol_surge = current['v_idx'] > (avg_vol * 1.05) if avg_vol > 0 else False
                 if vol_surge:
                     score += 1
                     details['volume_confirmation'] = True
 
-                # 0.1 Trend Filter (5m EMA proxy)
+                # 0.1 Trend Filter
                 ema_val = self.calculate_ema(subset, period=20)
-                trend_ok = current['c_idx'] < ema_val if ema_val > 0 else True
+                ema_long = self.calculate_ema(subset, period=50)
+                trend_ok = (current['c_idx'] < ema_val) and (current['c_idx'] < ema_long) if ema_val > 0 else True
                 if trend_ok:
                     score += 1
                     details['trend_confirmation'] = True
+
+                # 0.2 Time & Exhaustion
+                dt_utc = datetime.fromtimestamp(ts)
+                is_morning = (dt_utc.hour == 4 and dt_utc.minute >= 30) or (dt_utc.hour == 5) or (dt_utc.hour == 6 and dt_utc.minute <= 0)
+                is_afternoon = (dt_utc.hour == 8) or (dt_utc.hour == 9 and dt_utc.minute <= 30)
+                if not (is_morning or is_afternoon): continue
+
+                if self.is_exhausted(subset, threshold_pct=0.015 if "BANK" in self.underlying else 0.006): continue
 
                 # 1. Absorption Filter
                 is_absorption = current['c_idx'] <= ref_low['index_price'] and current['c_pe'] <= ref_low['pe_price']
 
                 # 2. Relative Velocity
                 idx_vel, ce_vel, pe_vel = self.calculate_relative_velocity(subset, lookback=3)
-                # Option delta is approx 0.5 ATM. Action is a 'Raid' if option moves > 1.5x expected velocity.
-                # Index drops (idx_vel < 0), Put should rise.
-                if pe_vel > abs(idx_vel) * 0.5 * 1.5 and pe_vel > 0:
+                if pe_vel > abs(idx_vel) * 0.5 * 1.1 and pe_vel > 0:
                     details['relative_velocity_high'] = True
                     score += 1
 
-                # 3. Symmetry of Panic (Opposing Option / Victim making fresh lows)
+                # 2.1 Candle Color
+                if len(subset) >= 3:
+                    if subset.iloc[-1]['c_pe'] > subset.iloc[-1]['o_pe'] and \
+                       subset.iloc[-2]['c_pe'] > subset.iloc[-2]['o_pe'] and \
+                       subset.iloc[-3]['c_pe'] > subset.iloc[-3]['o_pe']:
+                        score += 1
+                        details['color_confirmation'] = True
+
+                # 3. Symmetry of Panic
                 ce_fresh_low = current['c_ce'] < ref_low['ce_price'] and ce_vel < 0
                 if ce_fresh_low:
                     details['ce_victim_breakdown'] = True
@@ -367,35 +402,29 @@ class SymmetryAnalyzer:
                     details['shallow_pullback'] = True
                     score += 1
 
-                # 7. Writer Panic (Negative OI Delta)
+                # 7. Writer Panic
                 pe_oi_delta = 0
                 if oi_data and ts in oi_data:
                     pe_oi_delta = oi_data[ts].get('pe_oi_chg', 0)
 
-                # STRICTER OI RULE
-                writer_panic = True if (not oi_data or pe_oi_delta < -500) else False
+                writer_panic = True if (not oi_data or pe_oi_delta < -100) else False
                 if writer_panic:
                     details['writer_panic'] = True
                     score += 2
 
                 # 8. The Trigger: 
-                # - 2nd Attempt Relative Strength (`current['c_pe'] > ref_low['pe_price']`)
                 if not is_absorption and not self.is_late_to_party(subset, 'PE'):
-                    if ce_fresh_low and current['c_pe'] > ref_low['pe_price'] and writer_panic:
-                        # Tick Stream Anticipation check
+                    if ce_fresh_low and current['c_pe'] > (ref_low['pe_price'] * 1.02) and writer_panic:
                         if current['c_idx'] <= ref_low['index_price'] * 1.0005:
                             cooldown_passed = all(ts - s.get('time', 0) > 900 for s in signals[-3:])
-                            if score >= 5 and cooldown_passed and ts not in seen_timestamps:
+                            req_score = 5 if "NIFTY" in self.underlying else 3
+                            if score >= req_score and cooldown_passed and ts not in seen_timestamps:
                                 entry_price = float(current['c_pe'])
-                                # Balanced SL: 7% of premium + small 2pt buffer
-                                sl_buffer = (entry_price * 0.07) + 2.0
+                                sl_buffer = (entry_price * 0.05) + 1.0
                                 sl = entry_price - sl_buffer
                                 signals.append({
-                                    'time': ts,
-                                    'type': 'BUY_PE',
-                                    'score': score,
-                                    'price': entry_price,
-                                    'sl': float(sl),
+                                    'time': ts, 'type': 'BUY_PE', 'score': score, 'price': entry_price, 'sl': float(sl),
+                                    'tp': entry_price + (sl_buffer * 2.5),
                                     'details': details
                                 })
                                 seen_timestamps.add(ts)

@@ -107,7 +107,7 @@ STRATEGY_CONFIG = {
 }
 
 # Upstox Configuration
-UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN", "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI3NkFGMzUiLCJqdGkiOiI2OWEyOTIzMDU3NDY0OTRiNzVjMDA3NTEiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MjI2MTkzNiwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcyMzE2MDAwfQ.rAkbDZw9Kp11LtBmhgxl8uN6Qw3Nb9wURZa1xL7OFeo")
+UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN", "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI3NkFGMzUiLCJqdGkiOiI2OWEzYWMxNDU3NDY0OTRiNzVjMDExNWEiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MjMzNDEwMCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcyNDAyNDAwfQ.rLX_N6O-YexrShbTI0GqPJY0oN2aQVu61ehUbW6XeAc")
 UPSTOX_INDEX_MAP = {
     "NSE:NIFTY": "NSE_INDEX|Nifty 50",
     "NSE:BANKNIFTY": "NSE_INDEX|Nifty Bank",
@@ -169,7 +169,7 @@ MARKET_HOURS = {
 SNAPSHOT_CONFIG = {
     "interval_seconds": 180,  # 3 minutes between snapshots
     "backfill_interval_minutes": 5,  # 5-minute intervals for backfill
-    "enable_tv_volume_merge": True  # Set to True to merge TradingView volume for indices
+    "enable_tv_volume_merge": False  # Disabled to speed up backtesting and avoid TV hangs
 }
 
 # Feature Flags
