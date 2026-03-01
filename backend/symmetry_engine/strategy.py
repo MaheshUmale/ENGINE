@@ -302,10 +302,10 @@ class StrategyEngine:
         score = 0
         details = {}
 
-        # 0. Volume Confirmation
+        # 0. Volume Confirmation (Increased threshold to 1.5x)
         avg_vol = self.calculate_avg_volume(instruments['index'])
         current_vol = idx_data.get('volume', 0)
-        if avg_vol > 0 and current_vol > avg_vol:
+        if avg_vol > 0 and current_vol > (avg_vol * 1.5):
             score += 1
             details['volume_confirmation'] = True
 
@@ -357,9 +357,9 @@ class StrategyEngine:
         opp_oi_delta = float(opp_opt_data.get('oi_delta', 0))
         active_oi_total = float(active_opt_data.get('oi', 0))
 
-        # Require significant OI delta (>0.05% of total) to avoid noise
-        if active_oi_delta < 0 and (active_oi_total == 0 or abs(active_oi_delta) > active_oi_total * 0.0005):
-            score += 2
+        # STRICTER OI PANIC: -500 absolute change OR > 0.1% of total
+        if active_oi_delta < -500 or (active_oi_delta < 0 and active_oi_total > 0 and abs(active_oi_delta) > active_oi_total * 0.001):
+            score += 3 # Increased weighting
             details['oi_panic'] = True
 
         if opp_oi_delta > 0: # Buyers entering opposite side
@@ -438,7 +438,15 @@ class StrategyEngine:
                     return True
 
                 # Profit-Locked Aggressive Trailing
-                # If profit > 3x ATR, lock in at least 1x ATR profit
+                # 1. Break-Even: If profit > 1.5x ATR, move SL to Entry + small buffer
+                if active_opt_data['ltp'] > entry_price + (1.5 * atr):
+                    be_sl = entry_price + (0.2 * atr)
+                    if be_sl > current_sl:
+                        self.trailing_sl[self.index_name] = be_sl
+                        current_sl = be_sl
+                        print(f"BREAK-EVEN SL ACTIVATED for {self.index_name}")
+
+                # 2. Strong Profit Lock: If profit > 3x ATR, lock in at least 1x ATR profit
                 if active_opt_data['ltp'] > entry_price + (3 * atr):
                     locked_sl = entry_price + (1 * atr)
                     if locked_sl > current_sl:
